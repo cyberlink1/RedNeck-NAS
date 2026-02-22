@@ -38,11 +38,11 @@ if ($view === '') {
             </button>
             <div class="collapse navbar-collapse" id="navMenu">
                 <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link <?php if ($view==='disks') echo 'active'; ?>" href="dashboard.php?view=disks">Disks</a></li>
                     <li class="nav-item"><a class="nav-link <?php if ($view==='raid') echo 'active'; ?>" href="dashboard.php?view=raid">RAID</a></li>
                     <li class="nav-item"><a class="nav-link <?php if ($view==='lvm') echo 'active'; ?>" href="dashboard.php?view=lvm">LVM</a></li>
                     <li class="nav-item"><a class="nav-link <?php if ($view==='mounts') echo 'active'; ?>" href="dashboard.php?view=mounts">Mounts</a></li>
                     <li class="nav-item"><a class="nav-link <?php if ($view==='nfs') echo 'active'; ?>" href="dashboard.php?view=nfs">NFS Exports</a></li>
-                    <li class="nav-item"><a class="nav-link <?php if ($view==='disks') echo 'active'; ?>" href="dashboard.php?view=disks">Disks</a></li>
                 </ul>
                 <span class="navbar-text me-2">Logged in as <?php echo htmlspecialchars($user); ?></span>
                 <a class="btn btn-outline-light" href="logout.php">Logout</a>

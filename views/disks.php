@@ -96,6 +96,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = implode("<br>", $out);
         }
         $selected = $dev;
+    } elseif (isset($_POST['create_part_size'])) {
+        $dev = $_POST['disk'] ?? '';
+        $size = trim($_POST['size'] ?? '');
+        if ($dev === '' || $size === '') {
+            $message = 'Select a disk and specify a size for the new partition.';
+        } else {
+            // enforce the four‑partition limit
+            $current = partition_count($dev);
+            if ($current >= 4) {
+                $message = 'Disk already has maximum (4) partitions.';
+            } else {
+                // treat the supplied size as the end point; compute a sensible
+            // start.  On an empty disk this is 1MiB; for subsequent partitions
+            // use the end of the last partition + 1MiB.  unit mib makes parted
+            // output predictable for parsing.
+            $start = '1MiB';
+            if ($current > 0) {
+                $lastEnd = 1; // in MiB
+                $print = run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' unit mib print');
+                foreach ($print as $line) {
+                    if (preg_match('/^\s*\d+\s+([0-9]+\.?[0-9]*)MiB\s+([0-9]+\.?[0-9]*)MiB/', $line, $m)) {
+                        $endVal = floatval($m[2]);
+                        if ($endVal > $lastEnd) {
+                            $lastEnd = $endVal;
+                        }
+                    }
+                }
+                // start one MiB after last end
+                $start = ($lastEnd + 1) . 'MiB';
+            }
+            // validate that requested size is larger than start
+            $startMiB = 0;
+            if (preg_match('/([0-9]+\.?[0-9]*)MiB/', $start, $sm)) {
+                $startMiB = floatval($sm[1]);
+            }
+            // compute approximate available space using disk size from lsblk
+            $diskBytes = intval(trim(run_cmd('sudo lsblk -nb -o SIZE ' . escapeshellarg($dev))[0] ?? '0'));
+            $diskMiB = $diskBytes / (1024 * 1024);
+            $availMiB = max(0, $diskMiB - $startMiB);
+
+            $sizeMiB = convert_to_mib($size);
+            if ($sizeMiB !== null && $sizeMiB <= 0) {
+                $message = 'Specified size must be greater than zero.';
+            } elseif ($sizeMiB !== null && $sizeMiB > $availMiB) {
+                $message = 'Requested size ('.$size.') exceeds available space (approx '.round($availMiB,1).' MiB).';
+            } else {
+                // if we understood the size, compute an explicit end value to
+                // avoid rounding/interpretation discrepancies with parted
+                if ($sizeMiB !== null) {
+                    $endMiB = $startMiB + $sizeMiB;
+                    // round to three decimals for safety
+                    $end = round($endMiB, 3) . 'MiB';
+                } else {
+                    $end = $size;
+                }
+                $cmd = 'sudo parted -s ' . escapeshellarg($dev) .
+                       ' mkpart primary ' . escapeshellarg($start) . ' ' . escapeshellarg($end);
+                $out = run_cmd($cmd);
+                // same label initialization logic as above
+                $labelError = false;
+                foreach ($out as $i => $line) {
+                    if (stripos($line, 'unrecognised disk label') !== false) {
+                        $labelError = true;
+                        unset($out[$i]);
+                    }
+                }
+                if ($labelError) {
+                    $out[] = '(initialising GPT label)';
+                    $out = array_merge($out,
+                           run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' mklabel gpt'));
+                    $out = array_merge($out, run_cmd($cmd));
+                }
+                $message = implode("<br>", $out);
+            }
+            }
+        }
+        $selected = $dev;
     } elseif (isset($_POST['delete_part'])) {
         $dev = $_POST['disk'] ?? '';
         $num = intval($_POST['part_num'] ?? 0);
@@ -207,6 +284,60 @@ function has_partitions($dev) {
     return false;
 }
 
+// helper that returns the number of partitions on a disk
+function partition_count($dev) {
+    $count = 0;
+    $lines = run_cmd('sudo lsblk -n -o TYPE ' . escapeshellarg($dev));
+    foreach ($lines as $line) {
+        if (trim($line) === 'part') {
+            $count++;
+        }
+    }
+    return $count;
+}
+
+// convert human‑readable size string to MiB (approx); returns null on failure
+// Recognises suffixes like "1G", "500MB", "2TiB".  We first compute the
+// value in bytes using either decimal (1000) or binary (1024) multipliers,
+// then divide by 2^20 to obtain MiB.  This matches `parted`’s parsing rules –
+// bare "MB" is decimal while "MiB" or "MB" without an explicit suffix may
+// be treated differently, but the approximation is close enough for our
+// validation purposes.
+function convert_to_mib($sz) {
+    if (!is_string($sz) || $sz === '') return null;
+    if (preg_match('/^\s*([0-9]+(?:\.[0-9]+)?)\s*([kmgtKMGT]?)(i?B)?\s*$/', $sz, $m)) {
+        $val = floatval($m[1]);
+        $unit = strtolower($m[2]);
+        $suffix = isset($m[3]) ? strtolower($m[3]) : '';
+        $binary = true;
+        if ($suffix === 'b' && $unit !== '') {
+            // plain MB/GB/etc. -> decimal
+            $binary = false;
+        }
+        // compute bytes
+        switch ($unit) {
+            case 't':
+                $val *= ($binary ? 1024 ** 4 : 1000 ** 4);
+                break;
+            case 'g':
+                $val *= ($binary ? 1024 ** 3 : 1000 ** 3);
+                break;
+            case 'm':
+                $val *= ($binary ? 1024 ** 2 : 1000 ** 2);
+                break;
+            case 'k':
+                $val *= ($binary ? 1024 : 1000);
+                break;
+            default:
+                // bytes input, nothing to do
+                break;
+        }
+        // convert bytes to MiB
+        return $val / (1024 * 1024);
+    }
+    return null;
+}
+
 // helper to detect if a device appears to be a CD/DVD drive
 function is_cdrom($dev) {
     $lines = run_cmd('sudo lsblk -n -o TYPE ' . escapeshellarg($dev));
@@ -223,6 +354,7 @@ $cards_html = '';
 if ($selected) {
     $disabled = disk_in_use($selected, $mdmembers, $pvNames);
     $hasParts = has_partitions($selected);
+    $partCount = partition_count($selected);
     $isCdrom = is_cdrom($selected);
     if ($isCdrom) {
         $disabled = true; // prevent any partition/wipe actions
@@ -243,65 +375,27 @@ if ($selected) {
         This device is in use by RAID or LVM; partitioning and wiping actions are disabled.
         <?php endif; ?>
     </div>
-    <?php else: ?>
-    <div class="card mb-3">
-        <div class="card-header">Create Partition</div>
-        <div class="card-body">
-            <form method="post">
-                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                <div class="mb-3">
-                    <label class="form-label">Partition type</label>
-                    <select name="ptype" class="form-select">
-                        <option value="primary">primary</option>
-                        <option value="logical">logical</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Start (e.g. 0%, 1MiB)</label>
-                    <input name="start" class="form-control" required>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">End (e.g. 100%, 10GiB)</label>
-                    <input name="end" class="form-control" required>
-                </div>
-                <button name="create_part" type="submit" class="btn btn-primary">Create</button>
-            </form>
-        </div>
-    </div>
-    <?php if ($hasParts): ?>
-    <div class="card mb-3">
-        <div class="card-header">Delete Partition</div>
-        <div class="card-body">
-            <form method="post">
-                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                <div class="mb-3">
-                    <label class="form-label">Partition number</label>
-                    <input name="part_num" type="number" min="1" class="form-control" required>
-                </div>
-                <button id="btnDeletePart" name="delete_part" type="submit" class="btn btn-danger">Delete</button>
-            </form>
-        </div>
-    </div>
     <?php endif; ?>
-    <?php endif; ?>
-    <div class="card mb-3">
-        <div class="card-header">Other Actions</div>
-        <div class="card-body">
-            <?php if (!$disabled): ?>
-            <form method="post" style="display:inline">
-                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                <button id="btnWipe" name="wipe_disk" class="btn btn-warning">Wipe disk (GPT+superblocks)</button>
-            </form>
+
+    <div class="action-buttons mt-3">
+        <?php if (!$disabled): ?>
+            <button id="btnOpenCreate" class="btn btn-primary" data-disk="<?php echo htmlspecialchars($selected); ?>" <?php echo $partCount >= 4 ? 'disabled' : ''; ?>>Create Partition</button>
+            <?php if ($hasParts): ?>
+            <button id="btnOpenDelete" class="btn btn-danger ms-2" data-disk="<?php echo htmlspecialchars($selected); ?>">Delete Partition</button>
             <?php endif; ?>
             <form method="post" style="display:inline" class="ms-2">
                 <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                <button name="smart_status" class="btn btn-secondary">SMART status</button>
+                <button id="btnWipe" name="wipe_disk" class="btn btn-warning">Wipe disk</button>
             </form>
-            <form method="post" style="display:inline" class="ms-2">
-                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                <button name="identify" class="btn btn-info">Identify (LED)</button>
-            </form>
-        </div>
+        <?php endif; ?>
+        <form method="post" style="display:inline" class="ms-2">
+            <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
+            <button name="smart_status" class="btn btn-secondary">SMART status</button>
+        </form>
+        <form method="post" style="display:inline" class="ms-2">
+            <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
+            <button name="identify" class="btn btn-info">Identify (LED)</button>
+        </form>
     </div>
     <?php
     $cards_html = ob_get_clean();
@@ -313,6 +407,24 @@ if ($selected) {
 // back and prevents the disks list from polluting the popup.
 if (!empty($_REQUEST['ajax']) && $selected) {
     echo $cards_html;
+    exit;
+}
+// support standalone partition listing for delete-dropdown
+if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
+    $dev = $_GET['disk'];
+    $parts = [];
+    // use parted to list partition table; capture line text for label
+    $out = run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' print');
+    foreach ($out as $line) {
+        if (preg_match('/^\s*(\d+)\b/', $line, $m)) {
+            $parts[] = [
+                'num' => intval($m[1]),
+                'label' => trim($line)
+            ];
+        }
+    }
+    header('Content-Type: application/json');
+    echo json_encode($parts);
     exit;
 }
 
@@ -434,5 +546,50 @@ if (!empty($_REQUEST['ajax']) && $selected) {
        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
     </div>
    </div>
+  </div>
+</div>
+
+<!-- create/delete partition secondary modals -->
+<div class="modal fade" id="createPartModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Create Partition</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form>
+          <input type="hidden" name="disk" value="">
+          <div class="mb-3">
+            <label class="form-label">Size (e.g. 1G, 500M, 2T)</label>
+            <input name="size" class="form-control" required placeholder="e.g. 10G">
+          </div>
+          <button type="submit" name="create_part_size" class="btn btn-primary">Create</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="deletePartModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Delete Partition</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form>
+          <input type="hidden" name="disk" value="">
+          <div class="mb-3">
+            <label class="form-label">Partition number</label>
+            <select name="part_num" class="form-select" required>
+              <option value="">(loading…)</option>
+            </select>
+          </div>
+          <button type="submit" name="delete_part" class="btn btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
   </div>
 </div>
