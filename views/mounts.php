@@ -92,6 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $lvs = run_cmd('sudo lvs --noheadings -o lv_path');
 // gather current /export mounts for unmount dropdown
 $mnts = run_cmd("mount | grep ' on /export/'");
+// strip the lone "(exit N)" line grep prints when there are no matches
+$mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
 ?>
 
 <?php if ($message): ?>

@@ -25,3 +25,9 @@ body {
 #initialMessage {
     display: none;
 }
+
+/* prevent horizontal scrollbars inside preformatted cards; allow the card to
+   grow instead */
+.card-body pre {
+    overflow-x: visible;
+}

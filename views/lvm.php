@@ -99,33 +99,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // this prevents creation from aborting if old signatures exist
         $out = run_cmd("sudo lvcreate -n $name -L $size -y -Z y $vg");
         $message = implode("<br>", $out);
-    } elseif (isset($_POST['create_raid'])) {
-        // simple mdadm raid create
-        $level = intval($_POST['raid_level']);
-        $nameRaw = trim($_POST['raid_name']);
-        // strip leading /dev/ if provided
-        $nameClean = preg_replace('#^/dev/#','',$nameRaw);
-        $name = escapeshellarg($nameClean);
-        $devList = $_POST['devices'] ?? [];
-        // normalize each device path, strip duplicated /dev/
-        $devs = [];
-        foreach ($devList as $d) {
-            $d = trim($d);
-            $devs[] = preg_replace('#^/dev/#','/dev/',$d);
-        }
-        $norm = array_map('escapeshellarg', $devs);
-        $devices = implode(' ', $norm);
-        $out = [];
-        // wipe any lingering superblock metadata before creation so mdadm won't prompt
-        foreach ($devs as $d) {
-            $out = array_merge($out, run_cmd("sudo mdadm --zero-superblock " . escapeshellarg($d)));
-        }
-        $out = array_merge($out, run_cmd("sudo mdadm --create /dev/$name --level=$level --raid-devices=" . count($devList) . " $devices"));
-        // suppress known benign warnings that don't affect the result
-        $out = array_filter($out, function($line) {
-            return !preg_match('#(Unrecognised md component device|appears to be part of a raid array|Defaulting to version)#', $line);
-        });
-        $message = implode("<br>", $out);
     } elseif (isset($_POST['remove_lv'])) {
         $lv = escapeshellarg(trim($_POST['lv_select'] ?? ''));
         $out = run_cmd("sudo lvremove -fy $lv");
@@ -203,50 +176,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message .= ' (UUID lookup failed; ensure /usr/sbin/blkid is available to sudo)';
             }
         }
-    } elseif (isset($_POST['remove_raid'])) {
-        $raid = trim($_POST['raid_select'] ?? '');
-        if ($raid === '') {
-            $message = 'No RAID device selected.';
-        } else {
-            $msgs = [];
-            // strip prefix
-            $raidName = preg_replace('#^/dev/#','',$raid);
-            $raidPath = "/dev/" . $raidName;
-            // check if the device is used as a physical volume or in a VG
-            $pvcheck = run_cmd("sudo pvs --noheadings -o pv_name --select pv_name=" . escapeshellarg($raidPath));
-            // keep only valid device names; pvs may emit errors otherwise
-            $pvcheck = array_filter(array_map('trim', $pvcheck), function($v){ return strpos($v, '/dev/') === 0; });
-            if (count($pvcheck) > 0) {
-                // still in use by LVM – ask user to clean up first
-                $msgs[] = 'RAID device ' . htmlspecialchars($raidPath) . ' is still part of an LVM PV. ' .
-                         'Remove any logical volumes and volume groups using it, then try again.';
-                $message = implode("<br>", $msgs);
-            } else {
-                // gather member devices to clear metadata later
-                $members = [];
-                $detail = run_cmd("sudo mdadm --detail " . escapeshellarg($raidPath));
-                foreach ($detail as $line) {
-                    if (preg_match('#\s+(/dev/\S+)#', $line, $m)) {
-                        $members[] = $m[1];
-                    }
-                }
-                // stop/remove the array
-                $out = run_cmd("sudo mdadm --stop " . escapeshellarg($raidPath));
-                if (file_exists($raidPath)) {
-                    $out = array_merge($out, run_cmd("sudo mdadm --remove " . escapeshellarg($raidPath)));
-                }
-                foreach ($members as $m) {
-                    $out = array_merge($out, run_cmd("sudo mdadm --zero-superblock " . escapeshellarg($m)));
-                }
-                $out = array_filter($out, function($line){
-                    return strpos($line, 'No such file or directory') === false;
-                });
-                $msgs[] = implode("<br>", $out);
-                $msgs[] = 'RAID array ' . htmlspecialchars($raidPath) . ' removed successfully.';
-                $message = implode("<br>", $msgs);
-            }
-        }
     }
+    // end POST handler for $\_SERVER
 }
 
 // prepare data for rendering
@@ -392,102 +323,7 @@ $disks = list_disks();
             </div>
         </div>
     </div>
-    <div class="col-md-12">
-        <div class="card mb-3">
-            <div class="card-header">Create RAID Array</div>
-            <div class="card-body">
-                <form id="raidForm" method="post">
-                    <?php
-            // determine five unused /dev/mdX names
-            $used = [];
-            $mds = run_cmd('ls /dev/md* 2>/dev/null');
-            foreach ($mds as $m) {
-                $m = trim($m);
-                if ($m === '') continue;
-                if (preg_match('/md(\d+)$/', $m, $mm)) {
-                    $used[intval($mm[1])] = true;
-                }
-            }
-            $freeNames = [];
-            for ($i = 0; count($freeNames) < 5 && $i < 100; $i++) {
-                if (!isset($used[$i])) {
-                    $freeNames[] = "/dev/md$i";
-                }
-            }
-            // raid level labels for dropdown
-            $raidLevels = [
-                0 => 'Striped',
-                1 => 'Mirrored',
-                5 => 'RAID5',
-                6 => 'RAID6',
-            ];
-            ?>
-            <div class="mb-3">
-                <label class="form-label">Raid name</label>
-                <select name="raid_name" class="form-select" required>
-                    <option value="">-- choose --</option>
-                    <?php foreach ($freeNames as $n): ?>
-                        <option value="<?php echo htmlspecialchars($n); ?>"><?php echo htmlspecialchars($n); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Level</label>
-                <select name="raid_level" class="form-select" required>
-                    <option value="">-- choose --</option>
-                    <?php foreach ($raidLevels as $num => $label): ?>
-                        <option value="<?php echo $num; ?>"><?php echo htmlspecialchars("$label ($num)"); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-                    <div class="mb-3">
-                        <label class="form-label">Select Disks</label>
-                        <?php foreach ($disks as $line) {
-                            list($dev,$size)=explode(',',trim($line));
-                            // don't list existing md devices when building a new array
-                            if (strpos($dev, '/dev/md') === 0) continue;
-                        ?>
-                        <div class="form-check">
-                            <input class="form-check-input" name="devices[]" type="checkbox" value="<?php echo htmlspecialchars($dev); ?>" id="raid<?php echo htmlspecialchars(basename($dev)); ?>">
-                            <label class="form-check-label" for="raid<?php echo htmlspecialchars(basename($dev)); ?>"><?php echo htmlspecialchars($dev.' ('.$size.')'); ?></label>
-                        </div>
-                        <?php } ?>
-                    </div>
-                    <div id="deviceFields"></div>
-                    <button name="create_raid" type="submit" class="btn btn-primary">Create RAID</button>
-                </form>
-            </div>
-        </div>
-    </div>
 </div>
-<!-- existing RAID arrays -->
-<div class="row">
-    <div class="col-md-6">
-        <div class="card mb-3">
-            <div class="card-header">Existing RAID Arrays</div>
-            <div class="card-body">
-                <form method="post">
-                    <div class="mb-3">
-                        <label class="form-label">Select RAID device</label>
-                        <select name="raid_select" class="form-select">
-                            <option value="">-- none --</option>
-                            <?php
-                            // list /dev/md* entries
-                            $mds = run_cmd('ls /dev/md* 2>/dev/null');
-                            foreach ($mds as $m) {
-                                $dev = trim($m);
-                                if ($dev === '') continue;
-                                echo '<option value="' . htmlspecialchars($dev) . '">' . htmlspecialchars($dev) . '</option>';
-                            }
-                            ?>
-                            </select>
-                        </div>
-                        <button name="remove_raid" class="btn btn-danger" type="submit" onclick="return false;" id="btnRemoveRaid">Remove RAID</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
     <!-- removal/format section -->
     <div class="row">
         <div class="col-md-6">
