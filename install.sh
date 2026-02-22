@@ -7,7 +7,7 @@
 #
 set -euo pipefail
 
-REQUIRED_PKGS=(sudo libxcrypt2 pamtester lvm2 php php-cli apache2 php-common)
+REQUIRED_PKGS=(sudo libxcrypt2 pamtester lvm2 php php-cli apache2 php-common mdadm)
 # apache2/php packages above are typical; adjust if using nginx
 
 echo "Updating package lists..."
@@ -28,8 +28,8 @@ cat <<'EOFS' > "$SUDOERS_FILE"
 # sudo permissions for NFS/LVM web interface
 Defaults:www-data !requiretty
 www-data ALL=(ALL) NOPASSWD: \
-    /usr/bin/getent, /sbin/mdadm, /sbin/vgcreate, /sbin/lvcreate, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, \
-    /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs, \
+    /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/lvcreate, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
+    /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs, /usr/sbin/blkid, \
     /usr/bin/pamtester, /usr/bin/python3, /usr/bin/perl, \
     /bin/echo, /bin/cat, /bin/grep
 # allow lookups with arguments

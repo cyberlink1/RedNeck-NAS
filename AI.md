@@ -33,10 +33,31 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
   displays error messages gathered from `functions.php`; `dashboard.php`
   provides navigation.
 
-- `lvm.php`: main LVM/RAID UI. Contains logic to list and manage disks, PVs, VGs,
-  LVs, and RAIDs. When adding features (e.g. format LV, remove VG) update both
-  the form portions and the POST handlers at the top of the file. Keep the
-  helper functions (`list_disks`, etc.) in sync with new command usage.
+- `lvm.php`: main LVM/RAID UI. Contains logic to list and manage disks, PVs,
+  VGs, LVs, and RAIDs. When adding features (e.g. format LV, remove VG) update
+  both the form portions and the POST handlers at the top of the file. The RAID
+  create/remove handlers now automatically zero superblocks on devices; if you
+  introduce other operations that modify underlying devices remember to keep
+  metadata cleanup in mind.  The RAID creation form itself now builds a
+  drop-down of the first five unused `/dev/mdX` names and offers named level
+  choices (Striped, Mirrored, RAID5, RAID6) instead of raw numbers.  Attempting
+  to remove an array that is currently used as an LVM PV will now produce a
+  friendly warning telling you to remove LVs/VGs first; the PHP code does a
+  quick `pvs` check before calling `mdadm` and skips the stop/remove entirely
+  until the PV is gone.  (The earlier auto‑wipe attempt could still leave the
+  VG active and produce a "Cannot get exclusive access" error.)  The UI now
+  always appends a "RAID array /dev/mdX removed successfully" message once the
+  operation completes.  LV creation has been hardened
+  too—`lvcreate` is called with `-y -Z y`, which wipes any old filesystem
+  signatures and zeroes the start of a fresh volume.  Formatting LVs now
+  returns only a small success/failure message instead of dumping raw `mkfs`
+  output; the code first scans the mkfs output for a UUID and only invokes
+  `/usr/sbin/blkid` as a fallback.  Any "sudo: a password is required" messages
+  or `(exit N)` status lines are ignored.  The create
+  logic also filters out a handful of
+  benign mdadm warnings (e.g. “Unrecognised md component device”, “Defaulting
+  to version …”) so users aren’t confused by harmless output. Keep the helper functions (`list_disks`, etc.) in
+  sync with new command usage.
 
 - `nfs.php`: NFS export management. Simple form to append/remove lines in
   `/etc/exports` and reload via `exportfs`.

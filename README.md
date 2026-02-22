@@ -17,8 +17,8 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 2. Ensure the PHP process can read `/etc/shadow` (typically running as root or via sudo).  The code invokes `sudo getent shadow …`, and **sudoers entries must match the command path only**; arguments are not considered.  In other words, the previous example with `/usr/bin/getent shadow` did *not* match when the script added the username argument (`cl`), which is why you were still prompted for a password.  You should instead permit the `getent` binary itself (or allow any argument with a wildcard):
    ```
 www-data ALL=(ALL) NOPASSWD: \
-    /usr/bin/getent, /sbin/mdadm, /sbin/vgcreate, /sbin/lvcreate, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, \
-    /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs, \
+    /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/lvcreate, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
+    /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs, /usr/sbin/blkid, \
     /usr/bin/pamtester, /usr/bin/python3, /usr/bin/perl, /bin/echo, \
     /bin/cat, /bin/grep
    # or more narrowly: /usr/bin/getent shadow *, /usr/bin/lsblk
@@ -33,6 +33,29 @@ www-data ALL=(ALL) NOPASSWD: \
    `mdadm` under `sudo` as well, so those binaries must be included if you intend
    to manage storage from the interface.  Missing entries lead to warnings such as
    "Running as a non-root user. Functionality may be unavailable." in the UI.
+   
+   A new section of the UI lists existing `/dev/md*` arrays; you can select one
+   and remove it (the script stops and removes the array).  Disks that belong to
+   an array are automatically excluded from the "Available Disks" list, but the
+   RAID device itself is also shown in that panel and may be initialised as a PV
+   (useful if you want a volume on top of the array).  Destroying the array frees
+   its members for later use.
+
+   The removal step now also runs `mdadm --zero-superblock` on each former member
+   so they truly appear unused; without this you may see a warning like
+   "/dev/sda appears to be part of a raid array" when creating a new array.  The
+   UI also suppresses the harmless "error opening /dev/mdX: No such file or
+   directory" message that `mdadm --remove` can emit immediately after stopping
+   an array.  Attempting to delete an array that still has an LVM PV will now
+   abort early with a clear warning asking you to remove any logical volumes and
+   volume groups first; the array stop is not attempted until the LVM stack is
+   gone.  (Previous behaviour attempted to remove the array anyway and could
+   result in a misleading "Cannot get exclusive access" error.)  When building a
+   new RAID the form now filters out a few additional harmless messages such as
+   `Unrecognised md component device` and the "Defaulting to version" line so
+   the feedback area only shows meaningful results.  If you stop arrays manually
+   outside the UI you'll need to zero the superblock yourself (or the RAID‑creation
+   form will do it automatically now before it attempts to build the new array).
    Additionally, the front end uses `lsblk` (also via `sudo`) to enumerate raw
    disks when offering drives for initialization or RAID creation; without sudo
    the list may come back empty and you'll see "No raw disks detected." even
@@ -62,7 +85,7 @@ www-data ALL=(ALL) NOPASSWD: \
 ## Usage
 
 - **Dashboard**: Choose between LVM/RAID management and NFS exports.
-- **LVM/RAID**: View current physical volumes, volume groups, logical volumes. Create new VGs, LVs, or RAID arrays.
+- **LVM/RAID**: View current physical volumes, volume groups, logical volumes. Create new VGs, LVs, or RAID arrays; the RAID form now offers a pulldown of five unused `/dev/mdX` device names and presents named raid levels such as “Striped (0)”, “Mirrored (1)”, etc.  When selecting disks for a new array it no longer lists any existing `/dev/md*` devices.  Logical-volume creation will automatically wipe any leftover filesystem signatures and zero the start of the new LV (lvcreate is called with `-y -Z y`), avoiding prompts or aborts on recycled devices. Formatting an LV now produces a simple success/failure notice; when successful the new filesystem's UUID is also displayed (provided `/usr/sbin/blkid` can be run via sudo without a password prompt – add it to your sudoers drop-in if you want the UUID displayed.  Without that entry the modal will simply say "Logical volume formatted successfully (UUID lookup failed…)".)  The code also ignores any extraneous `sudo:` errors or `(exit N)` lines that might be appended. When removing or formatting a logical volume you select it by its short name, but the system actually operates on the full device path (e.g. `/dev/mapper/vg-lv`).
 - **NFS**: List current exports, add or remove exports. Changes are applied immediately via `exportfs -ra`.
 
 > ⚠️ All operations are potentially destructive. Use with care.
