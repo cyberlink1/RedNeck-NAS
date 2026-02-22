@@ -267,6 +267,7 @@ $disks = list_disks();
             <ul class="navbar-nav me-auto">
                 <li class="nav-item"><a class="nav-link active" href="lvm.php">LVM/RAID</a></li>
                 <li class="nav-item"><a class="nav-link" href="nfs.php">NFS Exports</a></li>
+                <li class="nav-item"><a class="nav-link" href="mounts.php">Mounts</a></li>
             </ul>
             <a class="btn btn-outline-light" href="logout.php">Logout</a>
         </div>

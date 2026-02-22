@@ -53,7 +53,10 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
   returns only a small success/failure message instead of dumping raw `mkfs`
   output; the code first scans the mkfs output for a UUID and only invokes
   `/usr/sbin/blkid` as a fallback.  Any "sudo: a password is required" messages
-  or `(exit N)` status lines are ignored.  The create
+  or `(exit N)` status lines are ignored.  A new section of the UI lets the
+  user mount a selected logical volume under `/export/<name>` (creating the
+  directory first) or unmount an existing `/export/*` mount; this requires
+  `mount`, `umount`, `mkdir` (and optionally `rmdir`) in sudoers.  The create
   logic also filters out a handful of
   benign mdadm warnings (e.g. “Unrecognised md component device”, “Defaulting
   to version …”) so users aren’t confused by harmless output. Keep the helper functions (`list_disks`, etc.) in
@@ -61,6 +64,14 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
 
 - `nfs.php`: NFS export management. Simple form to append/remove lines in
   `/etc/exports` and reload via `exportfs`.
+
+- `mounts.php`: new page for mounting logical volumes. Similar structure to
+  `lvm.php` but only handles `mount`/`umount` requests; populates selectors from
+  `lvs` and the current `/export/*` mount list. Requires sudo permissions for
+  `mount`, `umount`, `mkdir` (and optionally `rmdir`). It includes the global
+  confirmation modal and loads `assets/js/app.js` just like the other pages so
+  messages appear as popups; don’t forget to add those snippets if you copy the
+  page elsewhere.
 
 ### Assets
 

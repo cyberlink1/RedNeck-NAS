@@ -22,6 +22,7 @@ $user = $_SESSION['user'];
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item"><a class="nav-link" href="lvm.php">LVM/RAID</a></li>
                     <li class="nav-item"><a class="nav-link" href="nfs.php">NFS Exports</a></li>
+                    <li class="nav-item"><a class="nav-link" href="mounts.php">Mounts</a></li>
                 </ul>
                 <span class="navbar-text me-2">Logged in as <?php echo htmlspecialchars($user); ?></span>
                 <a class="btn btn-outline-light" href="logout.php">Logout</a>
