@@ -76,10 +76,15 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
 ### Assets
 
 - `assets/css/style.css`: additional CSS. Mostly minimal; modifications here
-  should complement Bootstrap styling in the HTML pages.
+  should complement Bootstrap styling in the HTML pages. **All custom
+  styling must go here; there should never be inline `<style>` blocks or
+  `style="…"` attributes in the PHP pages.**
 
 - `assets/js/app.js`: JavaScript helpers for UI behaviour (e.g. RAID device
-  parsing). Update when new client-side interactions are needed.
+  parsing). Update when new client-side interactions are needed. **All
+  executable JavaScript belongs in this file (or other JS modules you add);
+  pages should not contain inline `<script>` tags with logic or event
+  handlers.**
 
 ### Scripts
 
@@ -105,6 +110,8 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
 Whenever functionality is added or changed:
 
 1. **Code first**: implement the PHP/JS changes, test manually or via deploy.
+   *Remember that frontend tweaks belong in the central CSS/JS assets, not
+   inline in the page.*
 2. **Update sudoers**: if new shell commands are invoked with `sudo`, add them to
    both the README example and `install.sh` (the `/etc/sudoers.d/` template).
 3. **Update UI**: add new form elements or pages and corresponding handlers.
