@@ -34,6 +34,26 @@ function part_print($dev) {
 }
 
 $message = '';
+// filesystem types we can format with; determine by scanning the mkfs
+// binaries present under /sbin and /usr/sbin.  We normalize names and
+// remove duplicates (e.g. ext2/ext3/ext4 may all point to mke2fs).  Exclude
+// the generic 'mkfs' binary if it exists.
+$fsTypes = [];
+$paths = array_merge(glob('/sbin/mkfs.*') ?: [], glob('/usr/sbin/mkfs.*') ?: []);
+foreach ($paths as $path) {
+    $name = basename($path);
+    if (strpos($name, 'mkfs.') === 0) {
+        $type = substr($name, 5);
+        if ($type === '' || $type === 'mkfs') continue;
+        // ignore duplicates
+        if (!in_array($type, $fsTypes, true)) {
+            $fsTypes[] = $type;
+        }
+    }
+}
+// sort alphabetically for stable menu
+sort($fsTypes);
+
 // allow selection via POST (normal page) or GET (AJAX)
 $selected = $_REQUEST['disk'] ?? '';
 
@@ -181,6 +201,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $out = run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' rm ' . escapeshellarg($num));
             $message = implode("<br>", $out);
+        }
+        $selected = $dev;
+    } elseif (isset($_POST['format_part'])) {
+        $dev = $_POST['disk'] ?? '';
+        $num = intval($_POST['part_num'] ?? 0);
+        $fs = trim($_POST['fstype'] ?? '');
+        $formatResult = null; // will hold success/failure info for JS
+        if ($dev === '' || $num <= 0 || $fs === '') {
+            $message = 'Select a disk, partition and filesystem to format.';
+        } else if (!in_array($fs, $fsTypes, true)) {
+            $message = 'Unsupported filesystem type.';
+        } else {
+            $partdev = $dev . $num;
+            // some devices expect p before num if name ends with digit
+            if (preg_match('/\d$/',$dev)) {
+                $partdev = $dev . 'p' . $num;
+            }
+            $out = run_cmd('sudo mkfs.' . escapeshellarg($fs) . ' ' . escapeshellarg($partdev));
+            // determine exit status from last line if present
+            $ok = true;
+            if (!empty($out)) {
+                $last = end($out);
+                if (preg_match('/^\(exit (\d+)\)$/',$last, $m)) {
+                    if ((int)$m[1] !== 0) {
+                        $ok = false;
+                    }
+                }
+            }
+            $fmtMsg = $ok ? 'Format completed successfully.' : 'Format failed.';
+            // if failure, include output lines for debugging
+            if (!$ok) {
+                $fmtMsg .= '\n' . implode("\n", $out);
+            }
+            $formatResult = ['ok' => $ok, 'msg' => $fmtMsg];
+            // do NOT set $message; output will be handled by JS modal instead
         }
         $selected = $dev;
     } elseif (isset($_POST['wipe_disk'])) {
@@ -364,6 +419,13 @@ if ($selected) {
     if ($message) {
         echo '<div class="alert alert-info">' . $message . '</div>';
     }
+    // if we formatted a partition, include a hidden marker so JS can pop a
+    // dedicated modal instead of dumping the mkfs output into the card.
+    if (!empty($formatResult) && is_array($formatResult)) {
+        $attr = 'data-ok="' . ($formatResult['ok'] ? '1' : '0') . '"';
+        $msg = htmlspecialchars($formatResult['msg'], ENT_QUOTES);
+        echo "<div id=\"formatResult\" $attr data-msg=\"$msg\"></div>";
+    }
     ?>
     <div class="card mb-3">
         <div class="card-header">Partition Table for <?php echo htmlspecialchars($selected); ?></div>
@@ -382,6 +444,7 @@ if ($selected) {
             <button id="btnOpenCreate" class="btn btn-primary" data-disk="<?php echo htmlspecialchars($selected); ?>" <?php echo $partCount >= 4 ? 'disabled' : ''; ?>>Create Partition</button>
             <?php if ($hasParts): ?>
             <button id="btnOpenDelete" class="btn btn-danger ms-2" data-disk="<?php echo htmlspecialchars($selected); ?>">Delete Partition</button>
+            <button id="btnOpenFormat" class="btn btn-secondary ms-2" data-disk="<?php echo htmlspecialchars($selected); ?>">Format Partition</button>
             <?php endif; ?>
             <form method="post" style="display:inline" class="ms-2">
                 <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
@@ -532,7 +595,21 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
    </div>
   </div>
 </div>
-
+<!-- simple result modal for notifications (does *not* hide infoModal) -->
+<div class="modal fade" id="resultModal" tabindex="-1" aria-hidden="1">
+  <div class="modal-dialog">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Result</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body"></div>
+    <div class="modal-footer">
+       <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+    </div>
+   </div>
+  </div>
+</div>
 <!-- info/preview modal used for disk row clicks -->
 <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg">
@@ -564,8 +641,7 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
             <label class="form-label">Size (e.g. 1G, 500M, 2T)</label>
             <input name="size" class="form-control" required placeholder="e.g. 10G">
           </div>
-          <button type="submit" name="create_part_size" class="btn btn-primary">Create</button>
-        </form>
+          <button type="submit" name="create_part_size" class="btn btn-primary">Create</button>          <button type="button" class="btn btn-outline-secondary ms-2" data-bs-dismiss="modal">Cancel</button>        </form>
       </div>
     </div>
   </div>
@@ -593,3 +669,32 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
     </div>
   </div>
 </div>
+  <div class="modal fade" id="formatPartModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Format Partition</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form>
+            <input type="hidden" name="disk" value="">
+            <div class="mb-3">
+              <label class="form-label">Partition number</label>
+              <select name="part_num" class="form-select" required>
+                <option value="">(loading…)</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Filesystem type</label>
+              <select name="fstype" class="form-select" required>
+                <?php foreach ($fsTypes as $t) echo '<option>'.htmlspecialchars($t).'</option>'; ?>
+              </select>
+            </div>
+            <button type="submit" name="format_part" class="btn btn-secondary">Format</button>
+            <button type="button" class="btn btn-outline-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
