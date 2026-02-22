@@ -20,3 +20,8 @@ body {
     padding: 10px;
     margin-bottom: 10px;
 }
+
+/* hide the placeholder element used for passing messages from PHP to JS */
+#initialMessage {
+    display: none;
+}

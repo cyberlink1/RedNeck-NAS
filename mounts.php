@@ -122,9 +122,7 @@ $mnts = run_cmd("mount | grep ' on /export/'");
 </nav>
 <div class="container mt-4">
     <?php if ($message): ?>
-        <script>
-            window.__initialMessage = <?php echo json_encode($message); ?>;
-        </script>
+        <div id="initialMessage" style="display:none"><?php echo $message; ?></div>
     <?php endif; ?>
 
     <div class="row">
@@ -150,7 +148,7 @@ $mnts = run_cmd("mount | grep ' on /export/'");
                             <label class="form-label">Mount point (subdir under /export)</label>
                             <input name="mount_point" class="form-control" placeholder="myshare" required>
                         </div>
-                        <button name="mount_lv" class="btn btn-primary" type="submit">Mount</button>
+                        <button id="btnMount" name="mount_lv" class="btn btn-primary" type="submit">Mount</button>
                     </form>
                 </div>
             </div>
@@ -174,7 +172,7 @@ $mnts = run_cmd("mount | grep ' on /export/'");
                                 endforeach; ?>
                             </select>
                         </div>
-                        <button name="umount_lv" class="btn btn-secondary" type="submit">Unmount</button>
+                        <button id="btnUmount" name="umount_lv" class="btn btn-secondary" type="submit">Unmount</button>
                     </form>
                 </div>
             </div>
@@ -201,13 +199,5 @@ $mnts = run_cmd("mount | grep ' on /export/'");
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="assets/js/app.js"></script>
-<script>
-window.addEventListener('DOMContentLoaded', function() {
-    if (window.__initialMessage) {
-        showConfirmation(window.__initialMessage);
-        delete window.__initialMessage;
-    }
-});
-</script>
 </body>
 </html>

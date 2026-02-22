@@ -99,12 +99,48 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    // mount/unmount confirmation on mounts.php
+    var mountBtn = document.getElementById('btnMount');
+    if (mountBtn) {
+        mountBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Mount the selected logical volume?\nThis will create or use /export/<em>subdir</em>.', function() {
+                mountBtn.form.submit();
+            });
+        });
+    }
+    var umountBtn = document.getElementById('btnUmount');
+    if (umountBtn) {
+        umountBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Unmount the selected export?\nAny users accessing it will be disconnected.', function() {
+                umountBtn.form.submit();
+            });
+        });
+    }
+
+    // NFS export removal confirmation (buttons generated per row)
+    var exportButtons = document.querySelectorAll('button[name="remove_export"]');
+    exportButtons.forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Remove this NFS export?', function() {
+                // button name/value already in form
+                btn.form.submit();
+            });
+        });
+    });
 });
 
-// display any message that was provided before script loaded, after DOM ready
+// display any message that was provided by PHP via a hidden element
 window.addEventListener('DOMContentLoaded', function() {
-    if (window.__initialMessage) {
-        showConfirmation(window.__initialMessage);
-        delete window.__initialMessage;
+    var msgEl = document.getElementById('initialMessage');
+    if (msgEl) {
+        var text = msgEl.innerHTML;
+        if (text) {
+            showConfirmation(text);
+        }
+        msgEl.parentNode.removeChild(msgEl);
     }
 });

@@ -62,9 +62,7 @@ $exports = read_exports();
 </nav>
 <div class="container mt-4">
     <?php if ($message): ?>
-        <script>
-            window.__initialMessage = <?php echo json_encode($message); ?>;
-        </script>
+        <div id="initialMessage" style="display:none"><?php echo $message; ?></div>
     <?php endif; ?>
     <div class="card mb-3">
         <div class="card-header">Current exports</div>
@@ -94,6 +92,7 @@ $exports = read_exports();
     </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="assets/js/app.js"></script>
 
 <!-- confirmation modal used by JS -->
 <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
