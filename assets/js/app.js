@@ -1,26 +1,155 @@
 // General JS helpers
 console.log('App script loaded');
 
-function showConfirmation(text, onOk, onCancel) {
-    var modal = document.getElementById('confirmModal');
+// helper used by both the modal submit interceptor and the
+// confirmation callbacks; posts the form by AJAX and refreshes the info
+// modal contents with whatever HTML the server returns.
+function submitDiskFormAjax(form) {
+    var data = new FormData(form);
+    if (form._lastSubmitName) {
+        data.append(form._lastSubmitName, form._lastSubmitValue);
+    }
+    data.append('ajax', '1');
+    fetch('views/disks.php', { method: 'POST', body: data })
+        .then(function(resp) { return resp.text(); })
+        .then(function(newHtml) {
+            showInfo(newHtml);
+        })
+        .catch(function(err) {
+            console.error('modal form ajax error', err);
+        });
+}
+
+function attachDiskHandlers(root) {
+    root = root || document;
+    var deletePartBtn = root.querySelector('#btnDeletePart');
+    if (deletePartBtn) {
+        deletePartBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Delete the specified partition? This is destructive.', function() {
+                // add the button parameter then submit via AJAX so the
+                // page underneath isn’t replaced
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = deletePartBtn.name;
+                inp.value = deletePartBtn.value || '';
+                deletePartBtn.form.appendChild(inp);
+                submitDiskFormAjax(deletePartBtn.form);
+            });
+        });
+    }
+    var wipeBtn = root.querySelector('#btnWipe');
+    if (wipeBtn) {
+        wipeBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Wipe the selected disk (GPT table and superblocks)? This cannot be undone.', function() {
+                submitDiskFormAjax(wipeBtn.form);
+            });
+        });
+    }
+}
+
+function showInfo(html) {
+    var modal = document.getElementById('infoModal');
     if (!modal) return;
     var body = modal.querySelector('.modal-body');
-    var okBtn = modal.querySelector('.btn-ok');
-    var cancelBtn = modal.querySelector('.btn-cancel');
-    // allow simple HTML (e.g. <br>) in messages
-    body.innerHTML = text;
-    okBtn.onclick = function() { if (onOk) onOk(); var bs = bootstrap.Modal.getInstance(modal); bs.hide(); };
-    cancelBtn.onclick = function() { if (onCancel) onCancel(); var bs = bootstrap.Modal.getInstance(modal); bs.hide(); };
-    var bsModal = new bootstrap.Modal(modal);
-    bsModal.show();
+    body.innerHTML = html;
+    // attach handlers for any form buttons inside (delete/wipe requires confirm)
+    attachDiskHandlers(body);
+
+    // convert any forms in the modal into AJAX submissions so the surrounding
+    // page isn’t replaced with card HTML; after a POST we simply refresh the
+    // modal contents with the updated response.
+    body.querySelectorAll('form').forEach(function(form) {
+        // remember which submit button was clicked so its name/value can be
+        // included (FormData doesn’t automatically include the button unless
+        // it’s passed to the constructor).  this fixes the “create partition”
+        // action not being seen on AJAX submits.
+        form.querySelectorAll('button[type=submit]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                form._lastSubmitName = btn.name;
+                form._lastSubmitValue = btn.value || '';
+            });
+        });
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var data = new FormData(form);
+            if (form._lastSubmitName) {
+                data.append(form._lastSubmitName, form._lastSubmitValue);
+            }
+            data.append('ajax', '1');
+            fetch('views/disks.php', { method: 'POST', body: data })
+                .then(function(resp) { return resp.text(); })
+                .then(function(newHtml) {
+                    showInfo(newHtml);
+                })
+                .catch(function(err) {
+                    console.error('modal form ajax error', err);
+                });
+        });
+    });
+
+    // reuse existing bootstrap.Modal instance to avoid stacking backdrops when
+    // the modal is already visible.
+    var bsModal = bootstrap.Modal.getInstance(modal) || new bootstrap.Modal(modal);
+    if (!modal.classList.contains('show')) {
+        bsModal.show();
+    }
+}
+
+function showConfirmation(text, onOk, onCancel) {
+    // if info modal is open and currently shown, hide it first and only
+    // display the confirmation once the preview has completely closed.  this
+    // avoids the common problem of the confirm dialog appearing behind the
+    // still‑visible info modal/backdrop when actions are triggered from the
+    // preview window (e.g. wipe/delete buttons).
+    var info = document.getElementById('infoModal');
+    if (info) {
+        var iModal = bootstrap.Modal.getInstance(info);
+        if (iModal && info.classList.contains('show')) {
+            var handler = function() {
+                info.removeEventListener('hidden.bs.modal', handler);
+                actuallyShowConfirm();
+            };
+            info.addEventListener('hidden.bs.modal', handler);
+            iModal.hide();
+            return;
+        }
+    }
+    actuallyShowConfirm();
+
+    function actuallyShowConfirm() {
+        var modal = document.getElementById('confirmModal');
+        if (!modal) return;
+        var body = modal.querySelector('.modal-body');
+        var okBtn = modal.querySelector('.btn-ok');
+        var cancelBtn = modal.querySelector('.btn-cancel');
+        // allow simple HTML (e.g. <br>) in messages
+        body.innerHTML = text;
+        // attach handlers inside modal content if any
+        attachDiskHandlers(body);
+        okBtn.onclick = function() {
+            var bs = bootstrap.Modal.getInstance(modal);
+            bs.hide();
+            if (onOk) {
+                // delay slightly to ensure hide animation starts
+                setTimeout(onOk, 10);
+            }
+        };
+        cancelBtn.onclick = function() { if (onCancel) onCancel(); var bs = bootstrap.Modal.getInstance(modal); bs.hide(); };
+        var bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
+    }
 }
 
 // convert comma or space separated device string into hidden inputs before submit
 window.addEventListener('DOMContentLoaded', function() {
+    console.log('DOMContentLoaded handler fired');
     var form = document.getElementById('raidForm');
-    if (!form) return;
-    form.addEventListener('submit', function(e) {
-        var devicesInput = document.getElementById('raidDevices');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            var devicesInput = document.getElementById('raidDevices');
         if (devicesInput) {
             // remove existing hidden fields
             var container = document.getElementById('deviceFields');
@@ -99,30 +228,7 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
-    // disk view confirmations
-    var deletePartBtn = document.getElementById('btnDeletePart');
-    if (deletePartBtn) {
-        deletePartBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            showConfirmation('Delete the specified partition? This is destructive.', function() {
-                var inp = document.createElement('input');
-                inp.type = 'hidden';
-                inp.name = deletePartBtn.name;
-                inp.value = deletePartBtn.value || '';
-                deletePartBtn.form.appendChild(inp);
-                deletePartBtn.form.submit();
-            });
-        });
-    }
-    var wipeBtn = document.getElementById('btnWipe');
-    if (wipeBtn) {
-        wipeBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            showConfirmation('Wipe the selected disk (GPT table and superblocks)? This cannot be undone.', function() {
-                wipeBtn.form.submit();
-            });
-        });
-    }
+
 
     // mount/unmount confirmation on mounts.php
     var mountBtn = document.getElementById('btnMount');
@@ -155,7 +261,32 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+    // end if(form) block
+    }
 });
+
+// disk table row info/selection (run regardless of DOMContentLoaded state)
+(function() {
+    var diskTable = document.getElementById('diskTable');
+    console.log('diskTable element', diskTable);
+    if (diskTable) {
+        diskTable.querySelectorAll('tbody tr').forEach(function(row) {
+            row.addEventListener('click', function() {
+                var dev = row.dataset.dev || '';
+                console.log('disk row clicked', dev);
+                // request card HTML via AJAX
+                fetch('views/disks.php?ajax=1&disk=' + encodeURIComponent(dev))
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) {
+                        showInfo(html);
+                    })
+                    .catch(function(err) {
+                        console.error('AJAX error', err);
+                    });
+            });
+        });
+    }
+})();
 
 // display any message that was provided by PHP via a hidden element
 window.addEventListener('DOMContentLoaded', function() {

@@ -1,6 +1,12 @@
 <?php
-// Disk management view (included by dashboard.php). Authentication and
-// functions.php have already been loaded by the caller.
+// Disk management view (included by dashboard.php) or invoked directly for
+// AJAX lookups. When called directly we must load functions and enforce login
+// ourselves.
+
+if (!defined('IN_DASHBOARD')) {
+    require_once __DIR__ . '/../functions.php';
+    require_login();
+}
 
 // helpers
 function list_disks_full() {
@@ -13,6 +19,9 @@ function list_disks_full() {
         list($name,$size,$model,$serial,$type) = $parts;
         // skip cdrom/rom, loopback, and partition entries
         if (in_array($type, ['rom','loop','part'], true)) continue;
+        // some systems present CD/DVD drives as regular disks named "sr0",
+        // etc.; ignore those too so they never appear in the list.
+        if (preg_match('/^sr\d+$/', $name)) continue;
         // otherwise include everything (disks, md devices, crypt, etc.)
         $filtered[] = $line;
     }
@@ -25,7 +34,8 @@ function part_print($dev) {
 }
 
 $message = '';
-$selected = $_POST['disk'] ?? '';
+// allow selection via POST (normal page) or GET (AJAX)
+$selected = $_REQUEST['disk'] ?? '';
 
 // detect whether selected device is part of md or lvm so we can
 // disable partitioning/wiping actions later
@@ -64,7 +74,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($dev === '' || $start === '' || $end === '') {
             $message = 'Please select a disk and specify start/end for new partition.';
         } else {
-            $out = run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' mkpart ' . escapeshellarg($type) . ' ' . escapeshellarg($start) . ' ' . escapeshellarg($end));
+            $cmd = 'sudo parted -s ' . escapeshellarg($dev) .
+                   ' mkpart ' . escapeshellarg($type) .
+                   ' ' . escapeshellarg($start) .
+                   ' ' . escapeshellarg($end);
+            $out = run_cmd($cmd);
+            // drop initial unrecognised-label error if we will create a label
+            $labelError = false;
+            foreach ($out as $i => $line) {
+                if (stripos($line, 'unrecognised disk label') !== false) {
+                    $labelError = true;
+                    unset($out[$i]);
+                }
+            }
+            if ($labelError) {
+                $out[] = '(initialising GPT label)';
+                $out = array_merge($out,
+                       run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' mklabel gpt'));
+                $out = array_merge($out, run_cmd($cmd));
+            }
             $message = implode("<br>", $out);
         }
         $selected = $dev;
@@ -126,16 +154,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $disks = list_disks_full();
 
-// determine disks that are part of existing md arrays
+// determine disks that are part of existing md arrays and map members -> array names
 $mdmembers = [];
+$mdmap = []; // device => [md0,md1,...]
 $mdlines = run_cmd('cat /proc/mdstat');
 foreach ($mdlines as $line) {
-    // split on whitespace and look for tokens that look like /dev/...
-    $parts = preg_split('/\s+/', trim($line));
-    foreach ($parts as $p) {
-        if (strpos($p, '/dev/') === 0 && $p !== '/dev/md' && !preg_match('#^/dev/md\d#', $p)) {
-            // add only actual member devices (not the md device itself)
-            $mdmembers[] = $p;
+    // look for array header (mdN :)
+    if (preg_match('/^(md\d+)\s*:/', $line, $m)) {
+        $array = $m[1];
+        // find all member devices like sdb1[0] or nvme0n1p1[1]
+        if (preg_match_all('/\b([a-zA-Z0-9]+?)\[\d+\]/', $line, $mm)) {
+            foreach ($mm[1] as $d) {
+                $dev = '/dev/'.$d;
+                $mdmembers[] = $dev;
+                if (!isset($mdmap[$dev])) {
+                    $mdmap[$dev] = [];
+                }
+                $mdmap[$dev][] = $array;
+            }
         }
     }
 }
@@ -159,6 +195,127 @@ function disk_in_use($dev, $mdmembers, $pvNames) {
     }
     return false;
 }
+
+// helper to detect if a disk currently has any partitions
+function has_partitions($dev) {
+    $lines = run_cmd('sudo lsblk -n -o TYPE ' . escapeshellarg($dev));
+    foreach ($lines as $line) {
+        if (trim($line) === 'part') {
+            return true;
+        }
+    }
+    return false;
+}
+
+// helper to detect if a device appears to be a CD/DVD drive
+function is_cdrom($dev) {
+    $lines = run_cmd('sudo lsblk -n -o TYPE ' . escapeshellarg($dev));
+    foreach ($lines as $line) {
+        if (trim($line) === 'rom') {
+            return true;
+        }
+    }
+    return false;
+}
+
+// generate card HTML for a selected disk (used in page and ajax)
+$cards_html = '';
+if ($selected) {
+    $disabled = disk_in_use($selected, $mdmembers, $pvNames);
+    $hasParts = has_partitions($selected);
+    $isCdrom = is_cdrom($selected);
+    if ($isCdrom) {
+        $disabled = true; // prevent any partition/wipe actions
+    }
+    ob_start();
+    // show any message produced by a POST action at the top of the modal
+    if ($message) {
+        echo '<div class="alert alert-info">' . $message . '</div>';
+    }
+    ?>
+    <div class="card mb-3">
+        <div class="card-header">Partition Table for <?php echo htmlspecialchars($selected); ?></div>
+        <div class="card-body"><pre><?php echo htmlspecialchars(implode("\n", part_print($selected))); ?></pre></div>
+    </div>
+    <?php if ($disabled): ?>
+    <div class="alert alert-warning">
+        <?php if ($isCdrom): ?>This device appears to be a CD/DVD; modifications are disabled.<?php else: ?>
+        This device is in use by RAID or LVM; partitioning and wiping actions are disabled.
+        <?php endif; ?>
+    </div>
+    <?php else: ?>
+    <div class="card mb-3">
+        <div class="card-header">Create Partition</div>
+        <div class="card-body">
+            <form method="post">
+                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
+                <div class="mb-3">
+                    <label class="form-label">Partition type</label>
+                    <select name="ptype" class="form-select">
+                        <option value="primary">primary</option>
+                        <option value="logical">logical</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Start (e.g. 0%, 1MiB)</label>
+                    <input name="start" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">End (e.g. 100%, 10GiB)</label>
+                    <input name="end" class="form-control" required>
+                </div>
+                <button name="create_part" type="submit" class="btn btn-primary">Create</button>
+            </form>
+        </div>
+    </div>
+    <?php if ($hasParts): ?>
+    <div class="card mb-3">
+        <div class="card-header">Delete Partition</div>
+        <div class="card-body">
+            <form method="post">
+                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
+                <div class="mb-3">
+                    <label class="form-label">Partition number</label>
+                    <input name="part_num" type="number" min="1" class="form-control" required>
+                </div>
+                <button id="btnDeletePart" name="delete_part" type="submit" class="btn btn-danger">Delete</button>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
+    <?php endif; ?>
+    <div class="card mb-3">
+        <div class="card-header">Other Actions</div>
+        <div class="card-body">
+            <?php if (!$disabled): ?>
+            <form method="post" style="display:inline">
+                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
+                <button id="btnWipe" name="wipe_disk" class="btn btn-warning">Wipe disk (GPT+superblocks)</button>
+            </form>
+            <?php endif; ?>
+            <form method="post" style="display:inline" class="ms-2">
+                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
+                <button name="smart_status" class="btn btn-secondary">SMART status</button>
+            </form>
+            <form method="post" style="display:inline" class="ms-2">
+                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
+                <button name="identify" class="btn btn-info">Identify (LED)</button>
+            </form>
+        </div>
+    </div>
+    <?php
+    $cards_html = ob_get_clean();
+}
+
+// AJAX response support (GET or POST)
+// whenever the caller asked for `ajax=1` we only return the card HTML for
+// the selected disk; this keeps modal submissions from sending the full page
+// back and prevents the disks list from polluting the popup.
+if (!empty($_REQUEST['ajax']) && $selected) {
+    echo $cards_html;
+    exit;
+}
+
 ?>
 
 <?php if ($message): ?>
@@ -166,106 +323,116 @@ function disk_in_use($dev, $mdmembers, $pvNames) {
 <?php endif; ?>
 
 <div class="row">
-    <div class="col-md-4">
+    <div class="col-12">
         <div class="card mb-3">
             <div class="card-header">Disks</div>
             <div class="card-body">
                 <?php if (count($disks) === 0): ?>
                     <em>No disks found.</em>
                 <?php else: ?>
+                    <?php
+                        // determine the OS disk by following root mount parent chain
+                        $osDisk = '';
+                        $rootLines = run_cmd('lsblk -nr -o NAME,MOUNTPOINT');
+                        foreach ($rootLines as $l) {
+                            if (preg_match('/^(\S+)\s+\/\s*$/', trim($l), $m)) {
+                                $rootName = $m[1];
+                                $cur = $rootName;
+                                while (true) {
+                                    $parentLines = run_cmd('lsblk -nr -o PKNAME ' . escapeshellarg('/dev/'.$cur));
+                                    $parent = trim($parentLines[0] ?? '');
+                                    if ($parent === '' || $parent === $cur) break;
+                                    $cur = $parent;
+                                }
+                                $osDisk = '/dev/' . $cur;
+                                break;
+                            }
+                        }
+                    ?>
                     <form method="post" id="diskSelectForm">
-                        <div class="mb-3">
-                            <label class="form-label">Select disk</label>
-                            <select name="disk" class="form-select" onchange="this.form.submit()">
-                                <option value="">-- choose --</option>
-                                <?php foreach ($disks as $line):
-                                    $parts = preg_split('/\s+/', trim($line), 5);
-                                    $name   = $parts[0] ?? '';
-                                    $size   = $parts[1] ?? '';
-                                    $model  = $parts[2] ?? '';
-                                    $serial = $parts[3] ?? '';
-                                    // parts[4] contains TYPE which we don't show
-                                    $dev = '/dev/' . $name;
-                                ?>
-                                    <option value="<?php echo htmlspecialchars($dev); ?>" <?php if ($dev === $selected) echo 'selected'; ?>>
-                                        <?php echo htmlspecialchars("$dev ($size) $model $serial"); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
+                        <input type="hidden" name="disk" id="selectedDisk" value="<?php echo htmlspecialchars($selected); ?>">
+                        <table class="table table-sm table-hover" id="diskTable">
+                            <thead>
+                                <tr>
+                                    <th>Device</th>
+                                    <th>Name/Model</th>
+                                    <th>Size</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($disks as $line):
+                                $parts = preg_split('/\s+/', trim($line), 5);
+                                $name   = $parts[0] ?? '';
+                                $size   = $parts[1] ?? '';
+                                $model  = $parts[2] ?? '';
+                                $serial = $parts[3] ?? '';
+                                $type   = $parts[4] ?? '';
+                                $dev = '/dev/' . $name;
+                                $status = [];
+                                if ($dev === $osDisk) {
+                                    $status[] = 'OS disk';
+                                }
+                                if (strpos($dev, '/dev/md') === 0) {
+                                    $status[] = 'RAID device';
+                                } elseif (!empty($mdmap[$dev])) {
+                                    $status[] = 'member of '.implode(',', $mdmap[$dev]);
+                                }
+                                if (in_array($dev, $pvNames, true)) {
+                                    $status[] = 'LVM PV';
+                                }
+                                $statusStr = $status ? implode('; ', $status) : '';
+                                $rowClass = ($dev === $selected) ? 'table-active' : '';
+                            ?>
+                                <tr class="<?php echo $rowClass; ?>" data-dev="<?php echo htmlspecialchars($dev); ?>" data-name="<?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?>" data-size="<?php echo htmlspecialchars($size); ?>" data-status="<?php echo htmlspecialchars($statusStr); ?>">
+                                    <td><?php echo htmlspecialchars($dev); ?></td>
+                                    <td><?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?></td>
+                                    <td><?php echo htmlspecialchars($size); ?></td>
+                                    <td><?php echo htmlspecialchars($statusStr); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     </form>
                 <?php endif; ?>
             </div>
         </div>
     </div>
-
-    <div class="col-md-8">
-        <?php if ($selected): ?>
-            <?php $disabled = disk_in_use($selected, $mdmembers, $pvNames); ?>
-            <div class="card mb-3">
-                <div class="card-header">Partition Table for <?php echo htmlspecialchars($selected); ?></div>
-                <div class="card-body"><pre><?php echo htmlspecialchars(implode("\n", part_print($selected))); ?></pre></div>
-            </div>
-            <?php if ($disabled): ?>
-            <div class="alert alert-warning">This device is in use by RAID or LVM; partitioning and wiping actions are disabled.</div>
-            <?php else: ?>
-            <div class="card mb-3">
-                <div class="card-header">Create Partition</div>
-                <div class="card-body">
-                    <form method="post">
-                        <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                        <div class="mb-3">
-                            <label class="form-label">Partition type</label>
-                            <select name="ptype" class="form-select">
-                                <option value="primary">primary</option>
-                                <option value="logical">logical</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Start (e.g. 0%, 1MiB)</label>
-                            <input name="start" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">End (e.g. 100%, 10GiB)</label>
-                            <input name="end" class="form-control" required>
-                        </div>
-                        <button name="create_part" type="submit" class="btn btn-primary">Create</button>
-                    </form>
-                </div>
-            </div>
-            <div class="card mb-3">
-                <div class="card-header">Delete Partition</div>
-                <div class="card-body">
-                    <form method="post">
-                        <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                        <div class="mb-3">
-                            <label class="form-label">Partition number</label>
-                            <input name="part_num" type="number" min="1" class="form-control" required>
-                        </div>
-                        <button id="btnDeletePart" name="delete_part" type="submit" class="btn btn-danger">Delete</button>
-                    </form>
-                </div>
-            </div>
-            <?php endif; ?>
-            <div class="card mb-3">
-                <div class="card-header">Other Actions</div>
-                <div class="card-body">
-                    <?php if (!$disabled): ?>
-                    <form method="post" style="display:inline">
-                        <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                        <button id="btnWipe" name="wipe_disk" class="btn btn-warning">Wipe disk (GPT+superblocks)</button>
-                    </form>
-                    <?php endif; ?>
-                    <form method="post" style="display:inline" class="ms-2">
-                        <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                        <button name="smart_status" class="btn btn-secondary">SMART status</button>
-                    </form>
-                    <form method="post" style="display:inline" class="ms-2">
-                        <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-                        <button name="identify" class="btn btn-info">Identify (LED)</button>
-                    </form>
-                </div>
-            </div>
+    <?php if ($selected): ?>
+            <?php echo $cards_html; ?>
         <?php endif; ?>
     </div>
+</div>
+
+<!-- confirmation modal used by JS -->
+<div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Notice</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body"></div>
+    <div class="modal-footer">
+       <button type="button" class="btn btn-secondary btn-cancel" data-bs-dismiss="modal">Cancel</button>
+       <button type="button" class="btn btn-primary btn-ok">OK</button>
+    </div>
+   </div>
+  </div>
+</div>
+
+<!-- info/preview modal used for disk row clicks -->
+<div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Disk Details</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body"></div>
+    <div class="modal-footer">
+       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+    </div>
+   </div>
+  </div>
 </div>

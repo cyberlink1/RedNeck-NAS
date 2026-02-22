@@ -31,3 +31,14 @@ body {
 .card-body pre {
     overflow-x: visible;
 }
+
+/* make tables in cards span full width and allow scrolling if too wide */
+.card-body table {
+    width: 100%;
+    overflow-x: auto;
+}
+
+/* clicking a row should feel interactive */
+.card-body table tbody tr {
+    cursor: pointer;
+}
