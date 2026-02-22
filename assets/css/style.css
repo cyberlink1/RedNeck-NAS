@@ -1,0 +1,22 @@
+body {
+    font-family: sans-serif;
+    background: #f5f5f5;
+}
+
+/* override Bootstrap container padding if desired */
+.container {
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+/* legacy styles for non-bootstrap elements */
+.error {
+    color: red;
+}
+
+.message {
+    background: #e0ffe0;
+    border: 1px solid #0a0;
+    padding: 10px;
+    margin-bottom: 10px;
+}

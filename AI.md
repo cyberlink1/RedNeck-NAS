@@ -1,0 +1,95 @@
+# AI Instructions and Project Overview
+
+This document is intended for the AI assistant and future maintainers to
+understand the purpose of the files in this workspace, how they interact, and
+which ones need to be kept in sync when changes are made.
+
+## Project Purpose
+
+The repository implements a simple web-based NAS management interface using PHP
+and JavaScript. It allows authenticated system users to:
+
+- view and manipulate LVM physical volumes, volume groups, logical volumes and
+  MD RAID arrays
+- initialize raw disks as LVM physical volumes
+- remove logical volumes and volume groups
+- format logical volumes with arbitrary filesystems
+- manage NFS exports (add/remove lines in `/etc/exports`)
+
+Authentication is performed against `/etc/shadow` using `getent` and various
+helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
+`www-data`) with limited `sudo` privileges.
+
+## Key Files
+
+### PHP pages
+
+- `functions.php`: utility functions for authentication and running shell
+  commands. Also handles logging and error reporting. This file must include any
+  changes to how commands are executed (e.g. `sudo -n`) and the helpers used for
+  authentication.
+
+- `login.php`, `dashboard.php`, `logout.php`: user-facing pages. `login.php`
+  displays error messages gathered from `functions.php`; `dashboard.php`
+  provides navigation.
+
+- `lvm.php`: main LVM/RAID UI. Contains logic to list and manage disks, PVs, VGs,
+  LVs, and RAIDs. When adding features (e.g. format LV, remove VG) update both
+  the form portions and the POST handlers at the top of the file. Keep the
+  helper functions (`list_disks`, etc.) in sync with new command usage.
+
+- `nfs.php`: NFS export management. Simple form to append/remove lines in
+  `/etc/exports` and reload via `exportfs`.
+
+### Assets
+
+- `assets/css/style.css`: additional CSS. Mostly minimal; modifications here
+  should complement Bootstrap styling in the HTML pages.
+
+- `assets/js/app.js`: JavaScript helpers for UI behaviour (e.g. RAID device
+  parsing). Update when new client-side interactions are needed.
+
+### Scripts
+
+- `deploy.sh`: copies the workspace to a remote host via `rsync`. If new files
+  are added to the project, ensure `--exclude` patterns remain appropriate.
+
+- `install.sh`: bootstraps a fresh Debian host by installing required packages
+  and writing a sudoers drop-in. When the set of sudo commands changes (e.g.
+  adding support for `pvremove`), update this script accordingly.
+
+### Documentation
+
+- `README.md`: user-facing documentation. It describes installation,
+  requirements, debugging tips, and sudoers configuration. When adding new
+  features or commands, update this README in parallel with code changes so the
+  instructions remain accurate.
+
+- `AI.md`: this file (you are reading it) contains instructions for the AI to
+  understand the repository layout and what to maintain.
+
+## Updating Guidelines
+
+Whenever functionality is added or changed:
+
+1. **Code first**: implement the PHP/JS changes, test manually or via deploy.
+2. **Update sudoers**: if new shell commands are invoked with `sudo`, add them to
+   both the README example and `install.sh` (the `/etc/sudoers.d/` template).
+3. **Update UI**: add new form elements or pages and corresponding handlers.
+4. **Adjust scripts**: modify `deploy.sh` excludes or `install.sh` packages if
+   new dependencies are required.
+5. **Document**: edit `README.md` with usage instructions, debugging notes,
+   and any new requirements.
+6. **Reflect in AI.md**: if the change introduces new file types or behaviours,
+   add a brief note here to keep the AI aware.
+
+### Example
+
+- Added LV formatting action:
+  - Modified `lvm.php` (POST handler and form). Added `mkfs` to sudoers.
+  - Updated README to mention `mkfs` and new UI instructions.
+  - Updated `install.sh` to include `/usr/bin/mkfs`.
+  - Added description in this `AI.md` section.
+
+Keeping the documentation and scripts in sync ensures that future humans and
+automation understand the intended configuration and behaviour of the system.
