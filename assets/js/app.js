@@ -99,6 +99,30 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+    // disk view confirmations
+    var deletePartBtn = document.getElementById('btnDeletePart');
+    if (deletePartBtn) {
+        deletePartBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Delete the specified partition? This is destructive.', function() {
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = deletePartBtn.name;
+                inp.value = deletePartBtn.value || '';
+                deletePartBtn.form.appendChild(inp);
+                deletePartBtn.form.submit();
+            });
+        });
+    }
+    var wipeBtn = document.getElementById('btnWipe');
+    if (wipeBtn) {
+        wipeBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Wipe the selected disk (GPT table and superblocks)? This cannot be undone.', function() {
+                wipeBtn.form.submit();
+            });
+        });
+    }
 
     // mount/unmount confirmation on mounts.php
     var mountBtn = document.getElementById('btnMount');

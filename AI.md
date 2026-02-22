@@ -34,6 +34,7 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
   The actual functionality previously split across `lvm.php`, `nfs.php` and `mounts.php` has been moved into the `views/` directory. Each view is included by `dashboard.php` based on a `?view=` query parameter (e.g. `dashboard.php?view=lvm`). The old standalone pages still exist but simply redirect to the appropriate dashboard view and are considered deprecated.
 
 - `lvm.php`: main LVM UI (implementation now in `views/lvm.php`). The legacy `lvm.php` simply forwards to `dashboard.php?view=lvm`; RAID-specific functionality has been split out to its own view. The LVM view contains logic to list and manage disks, PVs, VGs, LVs and associated operations (initialize PVs, create/remove VGs/LVs, format or delete LVs). When adding features update both the form portions and the POST handlers at the top of the view file. Disk‑enumeration helpers such as `list_disks()` are still shared, as the LVM view needs them for PV initialization.
+- `disks.php` (new): redirect to dashboard `?view=disks`. The real implementation is in `views/disks.php`, which provides a disk‑focused interface: listing disks with model/serial, viewing partition table, creating/deleting partitions (via `parted`), wiping disks (GPT + superblocks with `sgdisk`/`wipefs`), displaying SMART health/temperature, and issuing an identify/locate signal by writing to `/sys/block/.../device/locate` if available. The dropdown excludes CD‑ROM/loop/partition devices but includes MD arrays; the view also detects if the selected device is part of an MD array, is itself an MD device, or is already an LVM PV and disables partitioning/wipe actions in those cases (a warning message is shown). Add any new action forms and corresponding POST handlers here. The dashboard navigation now includes a "Disks" entry.
 - `raid.php`: new page that used to be part of the combined LVM/RAID UI. It now redirects to `dashboard.php?view=raid`. The real implementation lives in `views/raid.php`, which handles RAID creation and removal exclusively. When updating raid functionality modify that view and ensure the redirect file is kept for compatibility.
 
 - `nfs.php`: NFS export management; now handled by `views/nfs.php` and accessed via the dashboard (legacy `nfs.php` redirects). Simple form to append/remove lines in `/etc/exports` and reload via `exportfs`.
@@ -60,7 +61,8 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
 
 - `install.sh`: bootstraps a fresh Debian host by installing required packages
   and writing a sudoers drop-in. When the set of sudo commands changes (e.g.
-  adding support for `pvremove`), update this script accordingly.
+  adding support for `pvremove` or disk utilities), update this script accordingly.  The new disk view requires `parted`, `gdisk`/`sgdisk`, `smartmontools` and
+  `wipefs` packages; these are added along with the appropriate sudoers entries.
 
 ### Documentation
 

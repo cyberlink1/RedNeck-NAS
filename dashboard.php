@@ -4,7 +4,7 @@ require_login();
 $user = $_SESSION['user'];
 
 // available view names map to files under views/
-$validViews = ['raid','lvm','mounts','nfs'];
+$validViews = ['raid','lvm','mounts','nfs','disks'];
 $view = $_GET['view'] ?? '';
 if (!in_array($view, $validViews, true)) {
     $view = '';
@@ -42,6 +42,7 @@ if ($view === '') {
                     <li class="nav-item"><a class="nav-link <?php if ($view==='lvm') echo 'active'; ?>" href="dashboard.php?view=lvm">LVM</a></li>
                     <li class="nav-item"><a class="nav-link <?php if ($view==='mounts') echo 'active'; ?>" href="dashboard.php?view=mounts">Mounts</a></li>
                     <li class="nav-item"><a class="nav-link <?php if ($view==='nfs') echo 'active'; ?>" href="dashboard.php?view=nfs">NFS Exports</a></li>
+                    <li class="nav-item"><a class="nav-link <?php if ($view==='disks') echo 'active'; ?>" href="dashboard.php?view=disks">Disks</a></li>
                 </ul>
                 <span class="navbar-text me-2">Logged in as <?php echo htmlspecialchars($user); ?></span>
                 <a class="btn btn-outline-light" href="logout.php">Logout</a>
