@@ -29,49 +29,15 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
   changes to how commands are executed (e.g. `sudo -n`) and the helpers used for
   authentication.
 
-- `login.php`, `dashboard.php`, `logout.php`: user-facing pages. `login.php`
-  displays error messages gathered from `functions.php`; `dashboard.php`
-  provides navigation.
+- `login.php`, `dashboard.php`, `logout.php`: user-facing pages. `login.php` displays error messages gathered from `functions.php`; `dashboard.php` provides navigation and now acts as the container for the various feature *views*.
 
-- `lvm.php`: main LVM/RAID UI. Contains logic to list and manage disks, PVs,
-  VGs, LVs, and RAIDs. When adding features (e.g. format LV, remove VG) update
-  both the form portions and the POST handlers at the top of the file. The RAID
-  create/remove handlers now automatically zero superblocks on devices; if you
-  introduce other operations that modify underlying devices remember to keep
-  metadata cleanup in mind.  The RAID creation form itself now builds a
-  drop-down of the first five unused `/dev/mdX` names and offers named level
-  choices (Striped, Mirrored, RAID5, RAID6) instead of raw numbers.  Attempting
-  to remove an array that is currently used as an LVM PV will now produce a
-  friendly warning telling you to remove LVs/VGs first; the PHP code does a
-  quick `pvs` check before calling `mdadm` and skips the stop/remove entirely
-  until the PV is gone.  (The earlier auto‑wipe attempt could still leave the
-  VG active and produce a "Cannot get exclusive access" error.)  The UI now
-  always appends a "RAID array /dev/mdX removed successfully" message once the
-  operation completes.  LV creation has been hardened
-  too—`lvcreate` is called with `-y -Z y`, which wipes any old filesystem
-  signatures and zeroes the start of a fresh volume.  Formatting LVs now
-  returns only a small success/failure message instead of dumping raw `mkfs`
-  output; the code first scans the mkfs output for a UUID and only invokes
-  `/usr/sbin/blkid` as a fallback.  Any "sudo: a password is required" messages
-  or `(exit N)` status lines are ignored.  A new section of the UI lets the
-  user mount a selected logical volume under `/export/<name>` (creating the
-  directory first) or unmount an existing `/export/*` mount; this requires
-  `mount`, `umount`, `mkdir` (and optionally `rmdir`) in sudoers.  The create
-  logic also filters out a handful of
-  benign mdadm warnings (e.g. “Unrecognised md component device”, “Defaulting
-  to version …”) so users aren’t confused by harmless output. Keep the helper functions (`list_disks`, etc.) in
-  sync with new command usage.
+  The actual functionality previously split across `lvm.php`, `nfs.php` and `mounts.php` has been moved into the `views/` directory. Each view is included by `dashboard.php` based on a `?view=` query parameter (e.g. `dashboard.php?view=lvm`). The old standalone pages still exist but simply redirect to the appropriate dashboard view and are considered deprecated.
 
-- `nfs.php`: NFS export management. Simple form to append/remove lines in
-  `/etc/exports` and reload via `exportfs`.
+- `lvm.php`: main LVM/RAID UI. (the implementation now lives in `views/lvm.php`; the legacy `lvm.php` file simply forwards to `dashboard.php?view=lvm`). Contains logic to list and manage disks, PVs, VGs, LVs, and RAIDs. When adding features (e.g. format LV, remove VG) update both the form portions and the POST handlers at the top of the view file. The RAID create/remove handlers now automatically zero superblocks on devices; if you introduce other operations that modify underlying devices remember to keep metadata cleanup in mind.  The RAID creation form itself now builds a drop-down of the first five unused `/dev/mdX` names and offers named level choices (Striped, Mirrored, RAID5, RAID6) instead of raw numbers.  Attempting to remove an array that is currently used as an LVM PV will now produce a friendly warning telling you to remove LVs/VGs first; the PHP code does a quick `pvs` check before calling `mdadm` and skips the stop/remove entirely until the PV is gone.  (The earlier auto‑wipe attempt could still leave the VG active and produce a "Cannot get exclusive access" error.)  The UI now always appends a "RAID array /dev/mdX removed successfully" message once the operation completes.  LV creation has been hardened too—`lvcreate` is called with `-y -Z y`, which wipes any old filesystem signatures and zeroes the start of a fresh volume.  Formatting LVs now returns only a small success/failure message instead of dumping raw `mkfs` output; the code first scans the mkfs output for a UUID and only invokes `/usr/sbin/blkid` as a fallback.  Any "sudo: a password is required" messages or `(exit N)` status lines are ignored.  A new section of the UI lets the user mount a selected logical volume under `/export/<name>` (creating the directory first) or unmount an existing `/export/*` mount; this requires `mount`, `umount`, `mkdir` (and optionally `rmdir`) in sudoers.  The create logic also filters out a handful of benign mdadm warnings (e.g. “Unrecognised md component device”, “Defaulting to version …”) so users aren’t confused by harmless output. Keep the helper functions (`list_disks`, etc.) in sync with new command usage.
 
-- `mounts.php`: new page for mounting logical volumes. Similar structure to
-  `lvm.php` but only handles `mount`/`umount` requests; populates selectors from
-  `lvs` and the current `/export/*` mount list. Requires sudo permissions for
-  `mount`, `umount`, `mkdir` (and optionally `rmdir`). It includes the global
-  confirmation modal and loads `assets/js/app.js` just like the other pages so
-  messages appear as popups; don’t forget to add those snippets if you copy the
-  page elsewhere.
+- `nfs.php`: NFS export management; now handled by `views/nfs.php` and accessed via the dashboard (legacy `nfs.php` redirects). Simple form to append/remove lines in `/etc/exports` and reload via `exportfs`.
+
+- `mounts.php`: new page for mounting logical volumes (the view is now in `views/mounts.php`). Similar structure to `lvm.php` but only handles `mount`/`umount` requests; populates selectors from `lvs` and the current `/export/*` mount list. Requires sudo permissions for `mount`, `umount`, `mkdir` (and optionally `rmdir`). It includes the global confirmation modal and loads `assets/js/app.js` just like the other pages so messages appear as popups; don’t forget to add those snippets if you copy the page elsewhere.
 
 ### Assets
 
@@ -114,7 +80,7 @@ Whenever functionality is added or changed:
    inline in the page.*
 2. **Update sudoers**: if new shell commands are invoked with `sudo`, add them to
    both the README example and `install.sh` (the `/etc/sudoers.d/` template).
-3. **Update UI**: add new form elements or pages and corresponding handlers.
+3. **Update UI**: add new form elements or pages and corresponding handlers.  When implementing a new menu item it should be created as a view under `views/` and pulled in by `dashboard.php`; update the nav links there and deprecate any previous standalone page.
 4. **Adjust scripts**: modify `deploy.sh` excludes or `install.sh` packages if
    new dependencies are required.
 5. **Document**: edit `README.md` with usage instructions, debugging notes,
