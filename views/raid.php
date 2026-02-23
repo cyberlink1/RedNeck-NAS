@@ -525,7 +525,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 
 <!-- modal containing create form -->
 <div class="modal fade" id="createRaidModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Create RAID Array</h5>
@@ -587,7 +587,10 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
                 <?php } ?>
             </div>
             <div id="deviceFields"></div>
+            <div class="text-end">
             <button name="create_raid" type="submit" class="btn btn-primary">Create RAID</button>
+            <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+        </div>
         </form>
       </div>
     </div>
@@ -596,7 +599,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 
 <!-- modal for adding a spare disk to an existing array -->
 <div class="modal fade" id="addRaidModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Add Disk to RAID</h5>
@@ -611,7 +614,10 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
               <option value="">(loading…)</option>
             </select>
           </div>
-          <button type="submit" name="add_member" class="btn btn-primary">Add</button>
+          <div class="text-end">
+            <button type="submit" name="add_member" class="btn btn-primary">Add</button>
+            <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+        </div>
         </form>
       </div>
     </div>
@@ -620,7 +626,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 
 <!-- modal for failing/removing a member from an array -->
 <div class="modal fade" id="failRaidModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Fail/Remove Member</h5>
@@ -635,7 +641,10 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
               <option value="">(loading…)</option>
             </select>
           </div>
-          <button type="submit" name="fail_member" class="btn btn-danger">Fail/Remove</button>
+          <div class="text-end">
+            <button type="submit" name="fail_member" class="btn btn-danger">Fail/Remove</button>
+            <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+        </div>
         </form>
       </div>
     </div>
@@ -661,7 +670,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 
 <!-- info/preview modal reused by both disk and raid views -->
 <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog modal-xl">
    <div class="modal-content">
     <div class="modal-header">
       <h5 class="modal-title">Details</h5>
@@ -677,7 +686,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 
 <!-- create/delete partition secondary modals (copied from disks.php so they exist in RAID view) -->
 <div class="modal fade" id="createPartModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Create Partition</h5>
@@ -698,7 +707,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 </div>
 
 <div class="modal fade" id="deletePartModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Delete Partition</h5>
@@ -714,14 +723,17 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
               <option value="">(loading…)</option>
             </select>
           </div>
-          <button type="submit" name="delete_part" class="btn btn-danger">Delete</button>
+          <div class="text-end">
+            <button type="submit" name="delete_part" class="btn btn-danger">Delete</button>
+            <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+        </div>
         </form>
       </div>
     </div>
   </div>
 </div>
   <div class="modal fade" id="formatPartModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title">Format Partition</h5>
@@ -753,7 +765,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 
 <!-- simple result modal for notifications (does *not* hide infoModal) -->
 <div class="modal fade" id="resultModal" tabindex="-1" aria-hidden="1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-xl">
    <div class="modal-content">
     <div class="modal-header">
       <h5 class="modal-title">Result</h5>
@@ -762,6 +774,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
     <div class="modal-body"></div>
     <div class="modal-footer">
        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+       <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
     </div>
    </div>
   </div>

@@ -777,13 +777,14 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
     <div class="modal-body"></div>
     <div class="modal-footer">
        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+       <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
     </div>
    </div>
   </div>
 </div>
 <!-- info/preview modal used for disk row clicks -->
 <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog modal-xl">
    <div class="modal-content">
     <div class="modal-header">
       <h5 class="modal-title">Disk Details</h5>
@@ -840,7 +841,10 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
               <option value="">(loading…)</option>
             </select>
           </div>
-          <button type="submit" name="delete_part" class="btn btn-danger">Delete</button>
+          <div class="text-end">
+            <button type="submit" name="delete_part" class="btn btn-danger">Delete</button>
+            <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+          </div>
         </form>
       </div>
     </div>

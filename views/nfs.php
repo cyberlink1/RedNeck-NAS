@@ -226,12 +226,32 @@ $rawExports = read_exports();
 $entries = parse_export_lines($rawExports);
 
 // compute mounted device for each exported directory
+// note: findmnt can return network sources (nfs server:path) if the
+// export directory itself lives on an NFS mount (e.g. rootfs on NFS).  we
+// only display a value when the source looks like a local block device; if
+// not, leave it blank (the wrong value was showing up on some systems).
 $deviceMap = [];
 foreach ($entries as $e) {
     $d = $e['dir'];
     if (!isset($deviceMap[$d])) {
+        $dev = '';
         $out = run_cmd("findmnt -n -o SOURCE --target " . escapeshellarg($d));
-        $deviceMap[$d] = !empty($out) ? trim($out[0]) : '';
+        if (!empty($out)) {
+            $cand = trim($out[0]);
+            if (strpos($cand, '/dev/') === 0) {
+                $dev = $cand;
+            } else {
+                // fallback to df in case findmnt returned something odd
+                $df = run_cmd("df -P " . escapeshellarg($d) . " | tail -1 | awk '{print $1}'");
+                if (!empty($df)) {
+                    $dfcand = trim($df[0]);
+                    if (strpos($dfcand, '/dev/') === 0) {
+                        $dev = $dfcand;
+                    }
+                }
+            }
+        }
+        $deviceMap[$d] = $dev;
     }
 }
 
@@ -339,7 +359,10 @@ var exportClients = <?php echo json_encode($grouped, JSON_HEX_TAG|JSON_HEX_AMP);
                 </table>
                 <button type="button" id="addEditClientBtn" class="btn btn-sm btn-secondary">+ Add client</button>
             </div>
-            <button name="edit_export" type="submit" class="btn btn-primary">Save</button>
+            <div class="text-end">
+                <button name="edit_export" type="submit" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
       </form>
     </div>
    </div>
@@ -381,7 +404,10 @@ var exportClients = <?php echo json_encode($grouped, JSON_HEX_TAG|JSON_HEX_AMP);
                 <button type="button" id="addClientBtn" class="btn btn-sm btn-secondary">+ Add client</button>
             </div>
             <input type="hidden" name="export_line" id="export_line">
-            <button name="add_export" type="submit" class="btn btn-primary">Create</button>
+            <div class="text-end">
+                <button name="add_export" type="submit" class="btn btn-primary">Create</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
       </form>
     </div>
    </div>
@@ -500,19 +526,3 @@ var exportClients = <?php echo json_encode($grouped, JSON_HEX_TAG|JSON_HEX_AMP);
   </div>
 </div>
 
-<!-- confirmation modal used by JS -->
-<div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
-   <div class="modal-content">
-    <div class="modal-header">
-      <h5 class="modal-title">Notice</h5>
-      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-    </div>
-    <div class="modal-body"></div>
-    <div class="modal-footer">
-       <button type="button" class="btn btn-secondary btn-cancel" data-bs-dismiss="modal">Cancel</button>
-       <button type="button" class="btn btn-primary btn-ok">OK</button>
-    </div>
-   </div>
-  </div>
-</div>

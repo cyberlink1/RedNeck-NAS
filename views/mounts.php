@@ -504,7 +504,10 @@ if (count($mounts) === 0 && count($mnts) > 0) {
                 <input type="checkbox" class="form-check-input" name="mount_boot" id="mountBoot">
                 <label class="form-check-label" for="mountBoot">Mount at boot (add to /etc/fstab)</label>
             </div>
-            <button id="btnMount" name="mount_lv" class="btn btn-primary" type="submit">Mount</button>
+            <div class="text-end">
+                <button id="btnMount" name="mount_lv" class="btn btn-primary" type="submit">Mount</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>
@@ -542,7 +545,10 @@ if (count($mounts) === 0 && count($mnts) > 0) {
                 <input type="checkbox" class="form-check-input" name="mount_boot" id="editMountBoot">
                 <label class="form-check-label" for="editMountBoot">Mount at boot (add to /etc/fstab)</label>
             </div>
-            <button id="btnEditMount" name="edit_mount" class="btn btn-primary" type="submit">Save</button>
+            <div class="text-end">
+                <button id="btnEditMount" name="edit_mount" class="btn btn-primary" type="submit">Save</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>

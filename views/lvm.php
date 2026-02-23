@@ -80,6 +80,15 @@ function list_disks() {
     foreach ($mds as $line) {
         $dev = trim($line);
         if ($dev === '' || !preg_match('#^/dev/md#', $dev)) continue;
+        // if the md device has been partitioned we don't show the base device
+        // here; the individual partitions (e.g. /dev/md0p1) may appear as PVs
+        // and are handled above.
+        $parts = run_cmd("sudo lsblk -n -o TYPE " . escapeshellarg($dev));
+        $hasPart = false;
+        foreach ($parts as $p) {
+            if (trim($p) === 'part') { $hasPart = true; break; }
+        }
+        if ($hasPart) continue;
         // skip if already used as a PV (pvcreate may have just run)
         if (in_array($dev, array_map('trim', $pvs), true)) {
             continue;
@@ -619,7 +628,10 @@ sort($fsTypes);
             <div class="mb-3">
                 <small class="form-text text-muted">Thin volumes will be created in the pool named <code>thin</code> within the chosen volume group.</small>
             </div>
-            <button name="create_lv" type="submit" class="btn btn-primary">Create LV</button>
+            <div class="text-end">
+                <button name="create_lv" type="submit" class="btn btn-primary">Create LV</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>
@@ -641,7 +653,10 @@ sort($fsTypes);
                 <label class="form-label">Size (e.g. 100G)</label>
                 <input name="tp_size" class="form-control" required>
             </div>
-            <button name="create_thinpool" type="submit" class="btn btn-secondary">Create pool</button>
+            <div class="text-end">
+                <button name="create_thinpool" type="submit" class="btn btn-secondary">Create pool</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>
@@ -670,7 +685,10 @@ sort($fsTypes);
                     } ?>
                 </select>
             </div>
-            <button name="format_lv" class="btn btn-warning">Format LV(s)</button>
+            <div class="text-end">
+                <button name="format_lv" class="btn btn-warning">Format LV(s)</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>
@@ -704,7 +722,10 @@ sort($fsTypes);
                     <?php } ?>
                 </select>
             </div>
-            <button name="remove_lv" class="btn btn-danger">Remove LV</button>
+            <div class="text-end">
+                <button name="remove_lv" class="btn btn-danger">Remove LV</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>
@@ -727,7 +748,10 @@ sort($fsTypes);
                 <label class="form-label">New size (e.g. +10G or 50G)</label>
                 <input name="lv_extend_size" class="form-control" required>
             </div>
-            <button class="btn btn-secondary">Extend LV</button>
+            <div class="text-end">
+                <button class="btn btn-secondary">Extend LV</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>
@@ -749,7 +773,10 @@ sort($fsTypes);
                 <label class="form-label">New name</label>
                 <input name="lv_new_name" class="form-control" required>
             </div>
-            <button class="btn btn-secondary">Rename LV</button>
+            <div class="text-end">
+                <button class="btn btn-secondary">Rename LV</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>
@@ -779,7 +806,10 @@ sort($fsTypes);
                     <option value="raid10">raid10</option>
                 </select>
             </div>
-            <button class="btn btn-secondary">Convert LV</button>
+            <div class="text-end">
+                <button class="btn btn-secondary">Convert LV</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+            </div>
         </form>
       </div>
     </div>
