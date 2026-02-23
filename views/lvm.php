@@ -14,8 +14,12 @@ function list_vgs() {
     return run_cmd('sudo vgs --noheadings -o vg_name,vg_size,vg_free');
 }
 function list_lvs() {
-    // include full logical volume path to make formatting/removal reliable
-    return run_cmd('sudo lvs --noheadings -o lv_path,vg_name,lv_size');
+    // include full logical volume path plus attr/layout so we can display
+    // filesystem and raid/linear status without calling lvdisplay for each
+    // entry.  use an explicit separator so empty fields (e.g. a missing
+    // lv_path) don’t cause the columns to shift; lv_layout tends to contain
+    // values like "linear", "raid1", "thin,pool", etc.
+    return run_cmd("sudo lvs --noheadings -o lv_path,vg_name,lv_size,lv_attr,lv_layout --separator '|'");
 }
 // obtain simple name/model map for devices shown in tables
 function get_device_models() {
@@ -92,6 +96,10 @@ function list_disks() {
 $message = '';
 $showVgAfter = false;
 $showLvAfter = false;
+// snapshot AJAX handling moved to dashboard.php so the request can return
+// pure data without the surrounding HTML template.  The old code lived here
+// but triggered stray markup being sent when the view was included by
+// dashboard.php.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['init_pvs'])) {
         $sel = $_POST['disks'] ?? [];
@@ -107,13 +115,110 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $out = run_cmd("sudo vgcreate $name $pvs");
         $message = implode("<br>", $out);
         $showVgAfter = true;
+    } elseif (isset($_POST['create_thinpool'])) {
+        $vg = escapeshellarg($_POST['tp_vg']);
+        $size = escapeshellarg($_POST['tp_size']);
+        // name is fixed to 'thin'
+        $name = 'thin';
+        // thin pool creation uses -Z zero by default; no raid/size choices.
+        $out = run_cmd("sudo lvcreate --type thin-pool -n $name -L $size -y -Z y $vg");
+        $message = implode("<br>", $out);
+        $showVgAfter = true;
     } elseif (isset($_POST['create_lv'])) {
         $vg = escapeshellarg($_POST['lv_vg']);
         $name = escapeshellarg($_POST['lv_name']);
         $size = escapeshellarg($_POST['lv_size']);
-        // use -y to auto‑answer prompts and -Z y to zero the start of the new LV
-        // this prevents creation from aborting if old signatures exist
-        $out = run_cmd("sudo lvcreate -n $name -L $size -y -Z y $vg");
+        $type = ($_POST['lv_type'] ?? 'linear');
+        $typeArg = '';
+        if ($type && $type !== 'linear') {
+            $typeArg = ' --type ' . escapeshellarg($type);
+        }
+        $thin = isset($_POST['lv_thin']);
+        if ($thin) {
+            $typeArg = ' --type thin';
+            // when thin, size argument is virtual size (-V) and specify the
+            // pool name (always 'thin').  some LVM versions insist on an
+            // explicit --thinpool even when the default pool is named thin.
+            $sizeArg = '-V ' . $size;
+            $poolArg = ' --thinpool thin';
+        } else {
+            $sizeArg = '-L ' . $size;
+            $poolArg = '';
+        }
+        // use -y to auto‑answer prompts.  zeroing start of LV (-Z y) is
+        // handy for normal volumes but not permitted when creating thin LVs or
+        // thin pools, so only include it when not thin.
+        $zeroArg = $thin ? '' : ' -Z y';
+        $out = run_cmd("sudo lvcreate" . $typeArg . $poolArg . " -n $name $sizeArg -y" . $zeroArg . " $vg");
+        $message = implode("<br>", $out);
+        $showLvAfter = true;
+    } elseif (isset($_POST['extend_lv'])) {
+        $lv = escapeshellarg($_POST['lv_select_extend']);
+        $size = escapeshellarg($_POST['lv_extend_size']);
+        $out = run_cmd("sudo lvextend -L $size -y $lv");
+        $message = implode("<br>", $out);
+        $showLvAfter = true;
+    } elseif (isset($_POST['rename_lv'])) {
+        $lv = trim($_POST['lv_select_rename']);
+        $newname = escapeshellarg($_POST['lv_new_name']);
+        // derive vg and old lv name
+        $old = basename($lv);
+        $vgname = basename(dirname($lv));
+        $out = run_cmd("sudo lvrename " . escapeshellarg($vgname) . " " . escapeshellarg($old) . " $newname");
+        $message = implode("<br>", $out);
+        $showLvAfter = true;
+    } elseif (isset($_POST['convert_lv'])) {
+        $lv = trim($_POST['lv_select_convert']);
+        $type = trim($_POST['lv_convert_type']);
+        // skip if already the requested layout
+        $curLayout = run_cmd("sudo lvs --noheadings -o lv_layout " . escapeshellarg($lv));
+        $cur = trim($curLayout[0] ?? '');
+        // lv_layout may contain comma components; take last part
+        if (strpos($cur, ',') !== false) {
+            $p = explode(',', $cur);
+            $cur = end($p);
+        }
+        if ($cur === $type || ($cur === '' && $type === 'linear')) {
+            $message = "Logical volume $lv is already of type $type.";
+        } else {
+            if ($type === 'linear' && strpos($cur, 'raid') === 0) {
+                // drop all mirror images by setting count to zero; this command
+                // does not accept --type linear or other raid options.
+                $out = run_cmd("sudo lvconvert -m0 --force -y " . escapeshellarg($lv));
+                $message = implode("<br>", $out);
+            } else {
+                // raid conversions often require extra flags
+                $extra = '';
+                if (strpos($type, 'raid') === 0) {
+                    if ($type === 'raid1') {
+                        // mirror count of 1
+                        $extra = ' -m1';
+                    } elseif ($type === 'raid0') {
+                        // default to two stripes if not specified
+                        $extra = ' --stripes 2';
+                    }
+                }
+                // include --force to handle layout changes that may otherwise be blocked
+                $out = run_cmd("sudo lvconvert --type " . escapeshellarg($type) . $extra . " --force -y " . escapeshellarg($lv));
+                $message = implode("<br>", $out);
+            }
+        }
+        $showLvAfter = true;
+    } elseif (isset($_POST['create_snap'])) {
+        $lv = escapeshellarg($_POST['snap_lv']);
+        $name = escapeshellarg($_POST['snap_name']);
+        $size = escapeshellarg($_POST['snap_size']);
+        $out = run_cmd("sudo lvcreate -s -n $name -L $size $lv");
+        $message = implode("<br>", $out);
+        $showLvAfter = true;
+    } elseif (isset($_POST['delete_snap'])) {
+        $snap = escapeshellarg($_POST['snap_select']);
+        $out = run_cmd("sudo lvremove -fy $snap");
+        $message = implode("<br>", $out);
+        $showLvAfter = true;
+    } elseif (isset($_POST['rollback_snap'])) {
+        $snap = escapeshellarg($_POST['snap_select']);
+        $out = run_cmd("sudo lvconvert --merge -y $snap");
         $message = implode("<br>", $out);
         $showLvAfter = true;
     } elseif (isset($_POST['remove_lv'])) {
@@ -312,12 +417,9 @@ sort($fsTypes);
     <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
 </div>
 
-<!-- button to launch VG management modal -->
-<button id="btnShowVgModal" class="btn btn-primary mb-3 me-2">Volume groups</button>
-<button id="btnShowLvModal" class="btn btn-primary mb-3">Logical volumes</button>
-
+<!-- PV table container (full width) -->
 <div class="row">
-    <div class="col-md-6">
+    <div class="col-12">
         <div class="card mb-3">
             <div class="card-header">Disks &amp; Physical Volumes</div>
             <div class="card-body">
@@ -359,9 +461,15 @@ sort($fsTypes);
             </div>
         </div>
     </div>
-
-<!-- LV management button and modals will handle logical volumes -->
 </div>
+
+<!-- action buttons moved to bottom right -->
+<div class="d-flex justify-content-end mb-3">
+    <button id="btnShowVgModal" class="btn btn-primary me-2">Volume groups</button>
+    <button id="btnShowLvModal" class="btn btn-primary">Logical volumes</button>
+</div>
+
+<!-- LV management modal and other dialogs follow -->
 
 <!-- LV management modal -->
 <div class="modal fade" id="lvModal" tabindex="-1" aria-hidden="true">
@@ -377,16 +485,46 @@ sort($fsTypes);
         <?php else: ?>
             <table class="table table-sm">
                 <thead>
-                    <tr><th></th><th>Device</th><th>Volume Group</th><th>Filesystem</th><th>Size</th></tr>
+                    <tr><th></th><th>Device</th><th>Volume Group</th><th>Type</th><th>Filesystem</th><th>Size</th><th>Snap</th></tr>
                 </thead>
                 <tbody>
                 <?php foreach ($lvs as $line):
-                    $parts = preg_split('/\s+/', trim($line));
+                    $parts = explode('|', trim($line));
                     $lvpath = $parts[0] ?? '';
                     $vgname = $parts[1] ?? '';
                     $lvsize = $parts[2] ?? '';
+                    $lvattr = $parts[3] ?? '';
+                    $lvlayout = $parts[4] ?? '';
                     if (!$lvpath) continue;
                     $display = basename($lvpath);
+                    // omit snapshots from the main LV list; they appear as
+                    // logical volumes too but users should manage them via the
+                    // snapshot modal.  snapshot LVs have an attr starting with 's'
+                    // (case‑insensitive).
+                    if ($lvattr !== '' && strtolower($lvattr[0]) === 's') continue;
+                    // omit the special thin pool LV from the listing; it lives
+                    // inside the VG but isn’t something users should format or
+                    // remove via the LV modal.
+                    // skip thin-pool LV entries; these have layout like "thin,pool".
+                    if (strpos($lvlayout, 'thin') !== false && strpos($lvlayout, 'pool') !== false) continue;
+                    if ($display === 'thin') continue;
+                    // derive type: prefer lv_layout if present, otherwise look at attr
+                    $lvtype = '';
+                    if ($lvlayout && $lvlayout !== '') {
+                        // lv_layout sometimes returns comma-separated list like
+                        // "raid,raid1"; show only the most specific component after
+                        // the comma.
+                        if (strpos($lvlayout, ',') !== false) {
+                            $parts2 = explode(',', $lvlayout);
+                            $lvtype = end($parts2);
+                        } else {
+                            $lvtype = $lvlayout;
+                        }
+                    } elseif ($lvattr !== '' && $lvattr[0] === 'r') {
+                        $lvtype = 'raid';
+                    } else {
+                        $lvtype = 'linear';
+                    }
                     // determine filesystem type if available
                     $fstype = '';
                     $blk = run_cmd('sudo blkid -s TYPE -o value ' . escapeshellarg($lvpath));
@@ -406,8 +544,10 @@ sort($fsTypes);
                         <td><input type="checkbox" class="lv-checkbox" value="<?php echo htmlspecialchars($lvpath); ?>"></td>
                         <td><?php echo htmlspecialchars($display); ?></td>
                         <td><?php echo htmlspecialchars($vgname); ?></td>
+                        <td><?php echo htmlspecialchars($lvtype); ?></td>
                         <td><?php echo htmlspecialchars($fstype); ?></td>
                         <td><?php echo htmlspecialchars($lvsize); ?></td>
+                        <td><button type="button" class="btn btn-sm btn-info snapshot-btn" data-lv="<?php echo htmlspecialchars($lvpath); ?>">Snap</button></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -416,6 +556,9 @@ sort($fsTypes);
       </div>
       <div class="modal-footer d-flex justify-content-end flex-nowrap">
         <button id="btnOpenCreateLv" class="btn btn-primary btn-sm me-1">Create</button>
+        <button id="btnOpenExtendLv" class="btn btn-secondary btn-sm me-1">Extend</button>
+        <button id="btnOpenRenameLv" class="btn btn-secondary btn-sm me-1">Rename</button>
+        <button id="btnOpenConvertLv" class="btn btn-secondary btn-sm me-1">Convert</button>
         <button id="btnOpenFormatLv" class="btn btn-warning btn-sm me-1">Format</button>
         <button id="btnOpenRemoveLv" class="btn btn-danger btn-sm me-1">Remove</button>
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
@@ -455,7 +598,49 @@ sort($fsTypes);
                 <label class="form-label">Size (e.g. 10G)</label>
                 <input name="lv_size" class="form-control" required>
             </div>
+            <div class="mb-3">
+                <label class="form-label">Type</label>
+                <select name="lv_type" class="form-select">
+                    <option value="linear" selected>linear</option>
+                    <option value="raid0">raid0</option>
+                    <option value="raid1">raid1</option>
+                    <option value="raid4">raid4</option>
+                    <option value="raid5">raid5</option>
+                    <option value="raid6">raid6</option>
+                    <option value="raid10">raid10</option>
+                </select>
+                <small class="form-text text-muted">Raid types may require additional parameters (e.g. stripe count); this just passes the --type flag.</small>
+            </div>
+            <div class="mb-3 form-check">
+                <input type="checkbox" class="form-check-input" id="lvThin" name="lv_thin" value="1">
+                <label class="form-check-label" for="lvThin">Thin provisioned</label>
+            </div>
+            <div class="mb-3">
+                <small class="form-text text-muted">Thin volumes will be created in the pool named <code>thin</code> within the chosen volume group.</small>
+            </div>
             <button name="create_lv" type="submit" class="btn btn-primary">Create LV</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- create thin pool modal (triggered from VG modal) -->
+<div class="modal fade" id="thinPoolModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Create Thin Pool</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="createThinPoolForm">
+            <input type="hidden" name="tp_vg" value="">
+            <div class="mb-3">
+                <label class="form-label">Size (e.g. 100G)</label>
+                <input name="tp_size" class="form-control" required>
+            </div>
+            <button name="create_thinpool" type="submit" class="btn btn-secondary">Create pool</button>
         </form>
       </div>
     </div>
@@ -506,9 +691,11 @@ sort($fsTypes);
                 <select name="lv_select" class="form-select" required>
                     <option value="">-- choose --</option>
                     <?php foreach ($lvs as $line) {
-                        $parts = preg_split('/\s+/', trim($line));
+                        $parts = explode('|', trim($line));
                         $lvpath = $parts[0] ?? '';
                         if (!$lvpath) continue;
+                        $lvlayout = $parts[4] ?? '';
+                        if (strpos($lvlayout, 'thin') !== false && strpos($lvlayout, 'pool') !== false) continue;
                         $display = basename($lvpath);
                     ?>
                     <option value="<?php echo htmlspecialchars($lvpath); ?>"><?php echo htmlspecialchars($display); ?></option>
@@ -522,6 +709,138 @@ sort($fsTypes);
   </div>
 </div>
 
+
+<!-- extend LV modal -->
+<div class="modal fade" id="extendLvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Extend Logical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="extendLvForm">
+            <input type="hidden" name="lv_select_extend" value="">
+            <div class="mb-3">
+                <label class="form-label">New size (e.g. +10G or 50G)</label>
+                <input name="lv_extend_size" class="form-control" required>
+            </div>
+            <button class="btn btn-secondary">Extend LV</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- rename LV modal -->
+<div class="modal fade" id="renameLvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Rename Logical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="renameLvForm">
+            <input type="hidden" name="lv_select_rename" value="">
+            <div class="mb-3">
+                <label class="form-label">New name</label>
+                <input name="lv_new_name" class="form-control" required>
+            </div>
+            <button class="btn btn-secondary">Rename LV</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- convert LV modal -->
+<div class="modal fade" id="convertLvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Convert Logical Volume Type</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="convertLvForm">
+            <input type="hidden" name="lv_select_convert" value="">
+            <div class="mb-3">
+                <label class="form-label">Target type</label>
+                <select name="lv_convert_type" class="form-select">
+                    <option value="linear" selected>linear</option>
+                    <option value="raid0">raid0</option>
+                    <option value="raid1">raid1</option>
+                    <option value="raid4">raid4</option>
+                    <option value="raid5">raid5</option>
+                    <option value="raid6">raid6</option>
+                    <option value="raid10">raid10</option>
+                </select>
+            </div>
+            <button class="btn btn-secondary">Convert LV</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- snapshot listing modal -->
+<div class="modal fade" id="snapshotModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Manage Snapshots</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="snapshotForm">
+            <input type="hidden" name="snap_lv" value="">
+            <table class="table table-sm">
+                <thead>
+                    <tr><th></th><th>Name</th><th>Size</th><th>Created</th></tr>
+                </thead>
+                <tbody id="snapListBody"></tbody>
+            </table>
+        </form>
+      </div>
+      <div class="modal-footer d-flex justify-content-end">
+        <button id="btnOpenCreateSnapshot" class="btn btn-primary me-2">Create</button>
+        <button id="btnSnapDelete" class="btn btn-warning me-2">Delete</button>
+        <button id="btnSnapRollback" class="btn btn-danger me-2">Rollback</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- create-snapshot modal -->
+<div class="modal fade" id="createSnapshotModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Create Snapshot</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="createSnapshotForm">
+            <input type="hidden" name="snap_lv" value="">
+            <div class="mb-3">
+                <label class="form-label">Snapshot name</label>
+                <input name="snap_name" class="form-control">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Size (e.g. 1G)</label>
+                <input name="snap_size" class="form-control">
+            </div>
+        </form>
+      </div>
+      <div class="modal-footer d-flex justify-content-end">
+        <button id="btnSnapCreate" type="button" class="btn btn-primary me-2">Create</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- confirmation modal used by JS -->
 <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
@@ -577,6 +896,7 @@ sort($fsTypes);
         <div class="mt-3 text-end">
             <button id="btnOpenCreateVg" class="btn btn-sm btn-primary">Create Volume Group</button>
             <button id="btnExtendSelectedVgs" type="button" class="btn btn-sm btn-secondary ms-2">Extend</button>
+            <button id="btnOpenThinPoolVg" type="button" class="btn btn-sm btn-secondary ms-2">Thin pool</button>
             <button id="btnOpenRemoveVg" class="btn btn-sm btn-danger ms-2">Remove Group</button>
             <button type="button" class="btn btn-sm btn-secondary ms-2" data-bs-dismiss="modal">Close</button>
         </div>

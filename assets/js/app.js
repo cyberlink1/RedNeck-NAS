@@ -100,6 +100,31 @@ document.addEventListener('DOMContentLoaded', function() {
             new bootstrap.Modal(document.getElementById('createLvModal')).show();
         });
     }
+    // thin pool creation is now initiated from the VG modal
+    var openThinPoolVg = document.getElementById('btnOpenThinPoolVg');
+    if (openThinPoolVg) {
+        openThinPoolVg.addEventListener('click', function() {
+            var selected = [];
+            document.querySelectorAll('#vgModal .vg-checkbox:checked').forEach(function(cb) {
+                if (cb.value) selected.push(cb.value);
+            });
+            if (selected.length === 0) {
+                showConfirmation('Please select one volume group to create a thin pool in.');
+                return;
+            }
+            if (selected.length > 1) {
+                showConfirmation('Please select only one volume group.');
+                return;
+            }
+            var vgModal = document.getElementById('vgModal');
+            var inst = bootstrap.Modal.getInstance(vgModal);
+            if (inst) inst.hide();
+            // populate hidden field
+            var tpvg = document.querySelector('#thinPoolModal input[name="tp_vg"]');
+            if (tpvg) tpvg.value = selected[0];
+            new bootstrap.Modal(document.getElementById('thinPoolModal')).show();
+        });
+    }
     var openFormatLv = document.getElementById('btnOpenFormatLv');
     if (openFormatLv) {
         openFormatLv.addEventListener('click', function() {
@@ -185,7 +210,265 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+    // extend / rename / convert workflows
+    var openExtendLv = document.getElementById('btnOpenExtendLv');
+    var openRenameLv = document.getElementById('btnOpenRenameLv');
+    var openConvertLv = document.getElementById('btnOpenConvertLv');
+    function pickSingleLv() {
+        var selected = [];
+        document.querySelectorAll('#lvModal .lv-checkbox:checked').forEach(function(cb){
+            if (cb.value) selected.push(cb.value);
+        });
+        return selected;
+    }
+    if (openExtendLv) {
+        openExtendLv.addEventListener('click', function() {
+            var sel = pickSingleLv();
+            if (sel.length === 0) {
+                showConfirmation('Please select one logical volume to extend.');
+                return;
+            }
+            if (sel.length > 1) {
+                showConfirmation('Please select only one logical volume.');
+                return;
+            }
+            var form = document.getElementById('extendLvForm');
+            if (form) {
+                form.querySelector('input[name="lv_select_extend"]').value = sel[0];
+            }
+            var lvModal = document.getElementById('lvModal');
+            var inst = bootstrap.Modal.getInstance(lvModal);
+            if (inst) inst.hide();
+            new bootstrap.Modal(document.getElementById('extendLvModal')).show();
+        });
+    }
+    if (openRenameLv) {
+        openRenameLv.addEventListener('click', function() {
+            var sel = pickSingleLv();
+            if (sel.length === 0) {
+                showConfirmation('Please select one logical volume to rename.');
+                return;
+            }
+            if (sel.length > 1) {
+                showConfirmation('Please select only one logical volume.');
+                return;
+            }
+            var form = document.getElementById('renameLvForm');
+            if (form) {
+                form.querySelector('input[name="lv_select_rename"]').value = sel[0];
+            }
+            var lvModal = document.getElementById('lvModal');
+            var inst = bootstrap.Modal.getInstance(lvModal);
+            if (inst) inst.hide();
+            new bootstrap.Modal(document.getElementById('renameLvModal')).show();
+        });
+    }
+    if (openConvertLv) {
+        openConvertLv.addEventListener('click', function() {
+            var sel = pickSingleLv();
+            if (sel.length === 0) {
+                showConfirmation('Please select one logical volume to convert.');
+                return;
+            }
+            if (sel.length > 1) {
+                showConfirmation('Please select only one logical volume.');
+                return;
+            }
+            // determine current type from table row
+            var currentType = '';
+            var cb = document.querySelector('#lvModal .lv-checkbox:checked');
+            if (cb) {
+                var tr = cb.closest('tr');
+                if (tr && tr.cells.length > 3) {
+                    currentType = tr.cells[3].textContent.trim();
+                }
+            }
+            var form = document.getElementById('convertLvForm');
+            if (form) {
+                form.querySelector('input[name="lv_select_convert"]').value = sel[0];
+                var selBox = form.querySelector('select[name="lv_convert_type"]');
+                if (selBox && currentType) {
+                    // disable option matching currentType (case-sensitive
+                    // match to be safe)
+                    Array.from(selBox.options).forEach(function(opt) {
+                        if (opt.value === currentType) {
+                            opt.disabled = true;
+                        } else {
+                            opt.disabled = false;
+                        }
+                    });
+                }
+            }
+            var lvModal = document.getElementById('lvModal');
+            var inst = bootstrap.Modal.getInstance(lvModal);
+            if (inst) inst.hide();
+            new bootstrap.Modal(document.getElementById('convertLvModal')).show();
+        });
+    }
+    var extendLvForm = document.getElementById('extendLvForm');
+    if (extendLvForm) {
+        extendLvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Extend the selected logical volume?', function() {
+                var inp = document.createElement('input');
+                inp.type = 'hidden'; inp.name = 'extend_lv'; inp.value = '1';
+                extendLvForm.appendChild(inp);
+                showSpinner();
+                extendLvForm.submit();
+            });
+        });
+    }
+    var renameLvForm = document.getElementById('renameLvForm');
+    if (renameLvForm) {
+        renameLvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Rename the logical volume?', function() {
+                var inp = document.createElement('input');
+                inp.type = 'hidden'; inp.name = 'rename_lv'; inp.value = '1';
+                renameLvForm.appendChild(inp);
+                showSpinner();
+                renameLvForm.submit();
+            });
+        });
+    }
+    var convertLvForm = document.getElementById('convertLvForm');
+    if (convertLvForm) {
+        convertLvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Convert the logical volume type? This may involve data movement.', function() {
+                var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'convert_lv'; inp.value = '1';
+                convertLvForm.appendChild(inp);
+                showSpinner();
+                convertLvForm.submit();
+            });
+        });
+    }
+    // snapshot logic (list/selection table + separate create modal)
+    // helper for human‑friendly size display
+    function hrSize(bytes) {
+        var b = parseFloat(bytes.toString().replace(/B$/, ''));
+        if (isNaN(b)) return bytes;
+        var units = ['B','K','M','G','T','P'];
+        var u = 0;
+        while (b >= 1024 && u < units.length-1) {
+            b /= 1024;
+            u++;
+        }
+        return b.toFixed( (u>0)?1:0 ) + units[u];
+    }
+    function loadSnapshots(lv) {
+        var tableBody = document.getElementById('snapListBody');
+        if (!tableBody) return;
+        tableBody.innerHTML = '';
+        return fetch('dashboard.php?view=lvm&ajax=list_snaps&lv=' + encodeURIComponent(lv))
+            .then(r => r.text())
+            .then(txt => {
+                // quick sanity check: if the response looks like a full HTML page,
+                // bail out rather than dumping markup into the table.
+                if (/<!doctype html|<html/i.test(txt)) {
+                    console.warn('snapshot list AJAX returned HTML, likely a login redirect');
+                    var tr = document.createElement('tr');
+                    tr.innerHTML = '<td colspan="4"><em>failed to load snapshots (maybe not logged in?)</em></td>';
+                    tableBody.appendChild(tr);
+                    return;
+                }
+                txt.split('\n').forEach(function(line) {
+                    line = line.trim();
+                    if (line === '') return;
+                    var parts = line.split('|');
+                    var path = parts[0] || '';
+                    var size = parts[1] || '';
+                    var time = parts[2] || '';
+                    // convert size to human units
+                    var displaySize = hrSize(size);
+                    var tr = document.createElement('tr');
+                    tr.innerHTML = '<td><input type="radio" name="snap_select" value="' +
+                        path + '"></td>' +
+                        '<td>' + path + '</td>' +
+                        '<td>' + displaySize + '</td>' +
+                        '<td>' + time + '</td>';
+                    tableBody.appendChild(tr);
+                });
+            });
+    }
+    document.querySelectorAll('.snapshot-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var lv = btn.getAttribute('data-lv');
+            var form = document.getElementById('snapshotForm');
+            if (form) {
+                form.snap_lv.value = lv;
+            }
+            var createForm = document.getElementById('createSnapshotForm');
+            if (createForm) {
+                createForm.snap_lv.value = lv;
+            }
+            loadSnapshots(lv);
+            var snapModal = document.getElementById('snapshotModal');
+            var inst = bootstrap.Modal.getInstance(snapModal);
+            if (inst) inst.hide();
+            new bootstrap.Modal(snapModal).show();
+        });
+    });
+    var snapForm = document.getElementById('snapshotForm');
+    if (snapForm) {
+        snapForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+        });
+    }
+    document.getElementById('btnOpenCreateSnapshot')?.addEventListener('click', function() {
+        var snapModal = document.getElementById('snapshotModal');
+        var inst = bootstrap.Modal.getInstance(snapModal);
+        if (inst) inst.hide();
+        new bootstrap.Modal(document.getElementById('createSnapshotModal')).show();
+    });
+    var createSnapshotForm = document.getElementById('createSnapshotForm');
+    document.getElementById('btnSnapCreate')?.addEventListener('click', function() {
+        if (createSnapshotForm) {
+            showConfirmation('Create snapshot?', function() {
+                var inp = document.createElement('input'); inp.type='hidden'; inp.name='create_snap'; inp.value='1';
+                createSnapshotForm.appendChild(inp);
+                showSpinner(); createSnapshotForm.submit();
+            });
+        }
+    });
+    document.getElementById('btnSnapDelete')?.addEventListener('click', function() {
+        if (!snapForm.snap_select.value) {
+            showConfirmation('Please select a snapshot to delete.');
+            return;
+        }
+        showConfirmation('Delete the selected snapshot? This is irreversible.', function() {
+            var inp = document.createElement('input'); inp.type='hidden'; inp.name='delete_snap'; inp.value='1';
+            snapForm.appendChild(inp);
+            showSpinner(); snapForm.submit();
+        });
+    });
+    document.getElementById('btnSnapRollback')?.addEventListener('click', function() {
+        if (!snapForm.snap_select.value) {
+            showConfirmation('Please select a snapshot to rollback.');
+            return;
+        }
+        showConfirmation('Rollback to the selected snapshot? This will overwrite the origin.', function() {
+            var inp = document.createElement('input'); inp.type='hidden'; inp.name='rollback_snap'; inp.value='1';
+            snapForm.appendChild(inp);
+            showSpinner(); snapForm.submit();
+        });
+    });
     var openRemoveVg = document.getElementById('btnOpenRemoveVg');
+    var thinPoolForm = document.getElementById('createThinPoolForm');
+    if (thinPoolForm) {
+        thinPoolForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Create the thin pool? Existing data may be overwritten.', function() {
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = 'create_thinpool';
+                inp.value = '1';
+                thinPoolForm.appendChild(inp);
+                showSpinner();
+                thinPoolForm.submit();
+            });
+        });
+    }
     if (openRemoveVg) {
         openRemoveVg.addEventListener('click', function() {
             // collect checked groups

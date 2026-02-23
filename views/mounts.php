@@ -114,6 +114,7 @@ $mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/',
                                 $lvpath = trim($line);
                                 if ($lvpath === '') continue;
                                 $display = basename($lvpath);
+                                if ($display === 'thin') continue; // hide the underlying thin pool
                             ?>
                             <option value="<?php echo htmlspecialchars($lvpath); ?>"><?php echo htmlspecialchars($display); ?></option>
                             <?php endforeach; ?>

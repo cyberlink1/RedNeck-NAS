@@ -9,6 +9,25 @@ $view = $_GET['view'] ?? '';
 if (!in_array($view, $validViews, true)) {
     $view = '';
 }
+// early AJAX endpoints must return *only* the data, no surrounding HTML
+if ($view === 'lvm' && isset($_GET['ajax']) && $_GET['ajax'] === 'list_snaps' && !empty($_GET['lv'])) {
+    $target = $_GET['lv'];
+    $basename = basename($target);
+    $snaps = run_cmd("sudo lvs --noheadings --units b -o lv_path,lv_size,lv_time,origin --separator '|' 2>/dev/null");
+    foreach ($snaps as $line) {
+        $parts = explode('|', trim($line));
+        if (count($parts) < 4) continue;
+        list($path, $size, $time, $origin) = $parts;
+        // ignore malformed/missing path entries
+        if ($path === '') continue;
+        // some LVM versions return only the LV name in origin, others the full
+        // path.  match either one.
+        if ($origin === $target || $origin === $basename) {
+            echo implode('|', [$path, $size, $time]) . "\n";
+        }
+    }
+    exit;
+}
 // prepare data structures; default to empty so count() never errors
 $lvs = [];
 $mnts = [];
