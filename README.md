@@ -19,7 +19,7 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 2. Ensure the PHP process can read `/etc/shadow` (typically running as root or via sudo).  The code invokes `sudo getent shadow …`, and **sudoers entries must match the command path only**; arguments are not considered.  In other words, the previous example with `/usr/bin/getent shadow` did *not* match when the script added the username argument (`cl`), which is why you were still prompted for a password.  You should instead permit the `getent` binary itself (or allow any argument with a wildcard):
    ```
 www-data ALL=(ALL) NOPASSWD: \
-    /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/lvcreate, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
+    /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
     /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/rmdir, \
     /usr/sbin/parted, /usr/sbin/sgdisk, /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, \
     /usr/bin/pamtester, /usr/bin/python3, /usr/bin/perl, /bin/echo, \
@@ -39,10 +39,10 @@ www-data ALL=(ALL) NOPASSWD: \
    
    A new section of the UI lists existing `/dev/md*` arrays; you can select one
    and remove it (the script stops and removes the array).  Disks that belong to
-   an array are automatically excluded from the "Available Disks" list, but the
-   RAID device itself is also shown in that panel and may be initialised as a PV
-   (useful if you want a volume on top of the array).  Destroying the array frees
-   its members for later use.
+   an array are automatically excluded from the combined device/physical-volume
+   table shown lower on the LVM page, but the RAID device itself is still shown
+   and may be initialised as a PV (useful if you want a volume on top of the
+   array).  Destroying the array frees its members for later use.
 
    The removal step now also runs `mdadm --zero-superblock` on each former member
    so they truly appear unused; without this you may see a warning like
@@ -99,7 +99,7 @@ www-data ALL=(ALL) NOPASSWD: \
 
   When a device is part of an MD array, is itself an MD device, or is already used as an LVM PV, the partitioning (“Create”/“Delete”) and wipe actions are disabled and a warning is displayed. SMART/temperature checks and the identify/locate button remain available for all devices. Confirmation dialogs protect destructive operations.
 
-- **LVM**: View and manage physical volumes, volume groups, and logical volumes. Initialize PVs from available disks, create VGs, and carve out LVs (the `lvcreate` command uses `-y -Z y` to erase signatures). Format or delete LVs, with filesystem UUIDs shown when available. Logical volumes must be formatted before mounting via the Mounts view. Removal and formatting actions occur here; details on mount/unmount behaviour are described in the dashboard section above.
+- **LVM**: View and manage physical volumes, volume groups, and logical volumes. The upper‑left pane now shows a single table combining uninitialised disks and existing PVs; each row includes device path, model (RAID devices are labelled “Raid Device”), volume group and size, and disks not yet allocated include a checkbox for creating a new PV. A **Volume groups** button at the top of the page opens a modal window listing all VGs (name, size, free space); the first column contains checkboxes so you can select one or more groups. A single **Extend** button sits between the Create and Remove controls; clicking it when one or more groups are checked opens a dialog showing each chosen VG alongside the pool of unused physical volumes. Tick the PVs you want to add under each group and submit – the server loops through each VG and runs `vgextend`. When you click **Remove Group**, a confirmation modal enumerates the selected VGs and warns that data will be lost; accepting submits the removal. The backend now leaves the underlying physical volumes intact (their LVM metadata is preserved), so they remain visible in the top table and may be assigned to another group later.  Within the VG modal you can also launch a dialog to create a new VG. The logical‑volumes card will expand horizontally as needed to accommodate long names, preventing a nested horizontal scrollbar. Initialize PVs from available disks, create VGs, and carve out LVs (the `lvcreate` command uses `-y -Z y` to erase signatures). Format or delete LVs, with filesystem UUIDs shown when available. Logical volumes must be formatted before mounting via the Mounts view. Removal and formatting actions occur here; details on mount/unmount behaviour are described in the dashboard section above.
 - **NFS**: List current exports, add or remove exports. Changes are applied immediately via `exportfs -ra`.
 
 > ⚠️ All operations are potentially destructive. Use with care.

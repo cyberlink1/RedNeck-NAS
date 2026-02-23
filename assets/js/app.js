@@ -43,6 +43,216 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    // volume-group modal button (first handler block ensures binding before event fires)
+    var showVgBtn = document.getElementById('btnShowVgModal');
+    if (showVgBtn) {
+        console.log('attaching vg modal opener');
+        showVgBtn.addEventListener('click', function() {
+            new bootstrap.Modal(document.getElementById('vgModal')).show();
+        });
+    }
+    var createVgBtn = document.getElementById('btnOpenCreateVg');
+    if (createVgBtn) {
+        createVgBtn.addEventListener('click', function() {
+            var vgModal = document.getElementById('vgModal');
+            var inst = bootstrap.Modal.getInstance(vgModal);
+            if (inst) inst.hide();
+            new bootstrap.Modal(document.getElementById('createVgModal')).show();
+        });
+    }
+    var openRemoveVg = document.getElementById('btnOpenRemoveVg');
+    if (openRemoveVg) {
+        openRemoveVg.addEventListener('click', function() {
+            // collect checked groups
+            var selected = [];
+            document.querySelectorAll('#vgModal .vg-checkbox:checked').forEach(function(cb) {
+                if (cb.value) selected.push(cb.value);
+            });
+            if (selected.length === 0) {
+                showConfirmation('Please select at least one volume group to remove.');
+                return;
+            }
+            var msg = 'The following volume groups will be removed and all data lost:<br>' + selected.join('<br>');
+            showConfirmation(msg, function() {
+                var form = document.createElement('form');
+                form.method = 'post';
+                form.style.display = 'none';
+                selected.forEach(function(v) {
+                    var inp = document.createElement('input');
+                    inp.type = 'hidden'; inp.name = 'vg_select[]'; inp.value = v;
+                    form.appendChild(inp);
+                });
+                var h = document.createElement('input');
+                h.type = 'hidden'; h.name = 'remove_vg'; h.value = '1';
+                form.appendChild(h);
+                document.body.appendChild(form);
+                form.submit();
+            });
+        });
+    }
+    // extend selected vg button in modal
+    var openExtendSelected = document.getElementById('btnExtendSelectedVgs');
+    if (openExtendSelected) {
+        openExtendSelected.addEventListener('click', function() {
+            var selected = [];
+            document.querySelectorAll('#vgModal .vg-checkbox:checked').forEach(function(cb) {
+                if (cb.value) selected.push(cb.value);
+            });
+            if (selected.length === 0) {
+                showConfirmation('Please select at least one volume group to extend.');
+                return;
+            }
+            var modal = document.getElementById('extendSelectedVgModal');
+            var bodyForm = modal.querySelector('#extendSelectedForm');
+            bodyForm.innerHTML = '';
+            selected.forEach(function(vg) {
+                var section = document.createElement('div');
+                section.className = 'mb-3';
+                var label = document.createElement('label');
+                label.className = 'form-label';
+                label.textContent = vg;
+                section.appendChild(label);
+                if (!unassignedPvs || unassignedPvs.length === 0) {
+                    var em = document.createElement('div'); em.innerHTML = '<em>No unused physical volumes available.</em>';
+                    section.appendChild(em);
+                } else {
+                    unassignedPvs.forEach(function(pv) {
+                        var checkdiv = document.createElement('div');
+                        checkdiv.className = 'form-check';
+                        var inp = document.createElement('input');
+                        inp.className = 'form-check-input';
+                        inp.type = 'checkbox';
+                        inp.name = 'pvs[' + vg + '][]';
+                        inp.value = pv;
+                        inp.id = 'ext_' + vg + '_' + pv.replace(/[^a-zA-Z0-9]/g,'_');
+                        var lab = document.createElement('label');
+                        lab.className = 'form-check-label';
+                        lab.htmlFor = inp.id;
+                        lab.textContent = pv;
+                        checkdiv.appendChild(inp);
+                        checkdiv.appendChild(lab);
+                        section.appendChild(checkdiv);
+                    });
+                }
+                var hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = 'vg_name[]';
+                hidden.value = vg;
+                section.appendChild(hidden);
+                bodyForm.appendChild(section);
+            });
+            var vgModal = document.getElementById('vgModal');
+            var inst = bootstrap.Modal.getInstance(vgModal);
+            if (inst && vgModal.classList.contains('show')) inst.hide();
+            new bootstrap.Modal(modal).show();
+        });
+    }
+    var vgModalElt = document.getElementById('vgModal');
+    if (vgModalElt) {
+        vgModalElt.addEventListener('shown.bs.modal', function(){
+            var selAll = document.getElementById('selectAllVgs');
+            if (selAll) {
+                selAll.checked = false;
+                selAll.addEventListener('change', function() {
+                    var chk = this.checked;
+                    document.querySelectorAll('#vgModal .vg-checkbox').forEach(function(cb){ cb.checked = chk; });
+                });
+            }
+            // when any individual box is unchecked, clear master
+            document.querySelectorAll('#vgModal .vg-checkbox').forEach(function(cb) {
+                cb.addEventListener('change', function() {
+                    if (!cb.checked && selAll) selAll.checked = false;
+                });
+            });
+        });
+    }
+
+    // intercept the Add-to-VG button rather than the form itself; this
+    // lets us construct a fresh POST payload after the confirmation dialog
+    // (avoiding issues caused by hiding the existing form).
+    var extendBtn = document.querySelector('#extendVgModal button[name="extend_vg"]');
+    if (extendBtn) {
+        extendBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Add selected physical volumes to the volume group? This will modify the VG.', function() {
+                var vgName = document.querySelector('#extendVgForm input[name="vg_name"]').value;
+                var selected = Array.from(document.querySelectorAll('#extendVgForm input[name="pvs[]"]:checked')).map(function(ch){return ch.value;});
+                console.log('extending VG', vgName, 'with pvs', selected);
+                var topForm = document.createElement('form');
+                topForm.method = 'post';
+                topForm.style.display = 'none';
+                // vg name
+                var inp = document.createElement('input');
+                inp.type = 'hidden'; inp.name = 'vg_name'; inp.value = vgName;
+                topForm.appendChild(inp);
+                // selected PVs
+                selected.forEach(function(val) {
+                    var h = document.createElement('input');
+                    h.type = 'hidden'; h.name = 'pvs[]'; h.value = val;
+                    topForm.appendChild(h);
+                });
+                var h2 = document.createElement('input');
+                h2.type = 'hidden'; h2.name = 'extend_vg'; h2.value = '1';
+                topForm.appendChild(h2);
+                document.body.appendChild(topForm);
+                topForm.submit();
+            });
+        });
+    }
+    // multi-extend submission interceptor
+    var extendMultiBtn = document.querySelector('#extendSelectedVgModal button[name="extend_vg_multi"]');
+    if (extendMultiBtn) {
+        extendMultiBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            // ensure at least one PV is checked across all groups
+            var anyChecked = document.querySelectorAll('#extendSelectedForm input[type="checkbox"]:checked').length > 0;
+            if (!anyChecked) {
+                showConfirmation('Please select at least one physical volume to add before submitting.');
+                return;
+            }
+            showConfirmation('Add selected physical volumes to the chosen volume groups? This will modify the VGs.', function() {
+                var topForm = document.createElement('form');
+                topForm.method = 'post';
+                topForm.style.display = 'none';
+                // copy vg_name[] hidden inputs
+                document.querySelectorAll('#extendSelectedForm input[name="vg_name[]"]').forEach(function(inp) {
+                    var h = document.createElement('input');
+                    h.type = 'hidden'; h.name = 'vg_name[]'; h.value = inp.value;
+                    topForm.appendChild(h);
+                });
+                // copy PV checkboxes (names like pvs[vg][])
+                document.querySelectorAll('#extendSelectedForm input[type="checkbox"]:checked').forEach(function(inp) {
+                    var h = document.createElement('input');
+                    h.type = 'hidden';
+                    h.name = inp.name;
+                    h.value = inp.value;
+                    topForm.appendChild(h);
+                });
+                var h2 = document.createElement('input');
+                h2.type = 'hidden'; h2.name = 'extend_vg_multi'; h2.value = '1';
+                topForm.appendChild(h2);
+                document.body.appendChild(topForm);
+                topForm.submit();
+            });
+        });
+    }
+
+    ['createVgModal','extendVgModal','extendSelectedVgModal'].forEach(function(id) {
+        var m = document.getElementById(id);
+        if (m) {
+            m.addEventListener('hidden.bs.modal', function() {
+                // if a confirmation dialog is pending, skip reopening parent;
+                // the showConfirmation logic will clear the flag when done.
+                if (window._confirmActive) {
+                    return;
+                }
+                var vg = document.getElementById('vgModal');
+                var bs = bootstrap.Modal.getInstance(vg) || new bootstrap.Modal(vg);
+                bs.show();
+            });
+        }
+    });
 });
 
 // helper used by both the modal submit interceptor and the
@@ -530,25 +740,17 @@ function openSubmodal(subId, disk) {
 
 function showConfirmation(text, onOk, onCancel) {
     console.log('showConfirmation called with text=', text);
-    // hide any visible info or create‑raid modals before showing the
-    // confirmation so its backdrop is on top.  once *all* requested
-    // modals have finished hiding we call actuallyShowConfirm (or call it
-    // immediately if none were visible).
+    // signal that a confirmation is in-flight; handlers should avoid
+    // re-opening any parent modals.
+    window._confirmActive = true;
+    // hide any visible modals before showing confirmation so its backdrop
+    // and z-index will sit on top.  this covers infoModal, raid, VG, extend,
+    // or any other dialogs that might be open.
     var toHide = [];
-    var info = document.getElementById('infoModal');
-    if (info) {
-        var iModal = bootstrap.Modal.getInstance(info);
-        if (iModal && info.classList.contains('show')) {
-            toHide.push(info);
-        }
-    }
-    var create = document.getElementById('createRaidModal');
-    if (create) {
-        var cModal = bootstrap.Modal.getInstance(create);
-        if (cModal && create.classList.contains('show')) {
-            toHide.push(create);
-        }
-    }
+    document.querySelectorAll('.modal.show').forEach(function(m) {
+        if (m.id === 'confirmModal') return; // skip self
+        toHide.push(m);
+    });
     var remaining = toHide.length;
     var done = function() {
         remaining--;
@@ -597,7 +799,24 @@ function showConfirmation(text, onOk, onCancel) {
         // show after a tiny delay so any existing backdrop from a just-closed
         // modal has been removed; this prevents the new dialog from ending up
         // visually beneath the old backdrop.
-        setTimeout(function() { bsModal.show(); }, 10);
+        setTimeout(function() {
+            bsModal.show();
+            // ensure confirm modal z-index is higher than any remaining show
+            var highest = 1055;
+            document.querySelectorAll('.modal.show').forEach(function(m) {
+                if (m === modal) return;
+                var z = parseInt(window.getComputedStyle(m).zIndex) || 0;
+                if (z >= highest) highest = z + 10;
+            });
+            modal.style.zIndex = highest;
+            // bump backdrop too
+            var back = document.querySelector('.modal-backdrop:last-of-type');
+            if (back) back.style.zIndex = highest - 5;
+        }, 10);
+        // clear flag when confirm is dismissed so parent modals can reopen
+        modal.addEventListener('hidden.bs.modal', function() {
+            window._confirmActive = false;
+        }, {once: true});
     }
 }
 
@@ -694,6 +913,8 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+
     // support any remove button generated per row or the old single button
     var raidRemoveButtons = document.querySelectorAll('button[name="remove_raid"]');
     raidRemoveButtons.forEach(function(btn) {
@@ -748,6 +969,27 @@ window.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// fallback VG button binder in case DOMContentLoaded handlers missed it
+(function(){
+    var btn = document.getElementById('btnShowVgModal');
+    if (btn) {
+        btn.addEventListener('click', function() {
+            new bootstrap.Modal(document.getElementById('vgModal')).show();
+        });
+    }
+})();
+
+// global cleanup: remove any orphaned backdrops once the last modal closes
+// (addresses situations where closing via the X leaves a grey overlay).
+document.addEventListener('hidden.bs.modal', function() {
+    // defer slightly to allow Bootstrap's own handlers to run first
+    setTimeout(function() {
+        if (document.querySelectorAll('.modal.show').length === 0) {
+            document.querySelectorAll('.modal-backdrop').forEach(function(b){ b.remove(); });
+        }
+    }, 10);
+});
+
 // disk table row info/selection (run regardless of DOMContentLoaded state)
 (function() {
     var diskTable = document.getElementById('diskTable');
@@ -792,8 +1034,17 @@ window.addEventListener('DOMContentLoaded', function() {
     var msgEl = document.getElementById('initialMessage');
     if (msgEl) {
         var text = msgEl.innerHTML;
+        var reopen = msgEl.dataset.reopenVg === '1';
         if (text) {
-            showConfirmation(text);
+            showConfirmation(text, function() {
+                if (reopen) {
+                    new bootstrap.Modal(document.getElementById('vgModal')).show();
+                }
+            });
+        } else {
+            if (reopen) {
+                new bootstrap.Modal(document.getElementById('vgModal')).show();
+            }
         }
         msgEl.parentNode.removeChild(msgEl);
     }

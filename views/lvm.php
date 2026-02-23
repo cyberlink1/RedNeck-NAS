@@ -17,6 +17,19 @@ function list_lvs() {
     // include full logical volume path to make formatting/removal reliable
     return run_cmd('sudo lvs --noheadings -o lv_path,vg_name,lv_size');
 }
+// obtain simple name/model map for devices shown in tables
+function get_device_models() {
+    $map = [];
+    // we only need name and model, omit empty models
+    $out = run_cmd("sudo lsblk -dn -o NAME,MODEL");
+    foreach ($out as $line) {
+        $parts = preg_split('/\s+/', trim($line), 2);
+        if (count($parts) === 2) {
+            $map['/dev/' . $parts[0]] = trim($parts[1]);
+        }
+    }
+    return $map;
+}
 // list raw disks not containing partitions
 function list_disks() {
     // list only disk-type devices, running under sudo to ensure visibility
@@ -77,6 +90,7 @@ function list_disks() {
 
 // POST handlers
 $message = '';
+$showVgAfter = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['init_pvs'])) {
         $sel = $_POST['disks'] ?? [];
@@ -91,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pvs = implode(' ', array_map('escapeshellarg', $sel));
         $out = run_cmd("sudo vgcreate $name $pvs");
         $message = implode("<br>", $out);
+        $showVgAfter = true;
     } elseif (isset($_POST['create_lv'])) {
         $vg = escapeshellarg($_POST['lv_vg']);
         $name = escapeshellarg($_POST['lv_name']);
@@ -104,19 +119,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $out = run_cmd("sudo lvremove -fy $lv");
         $message = implode("<br>", $out);
     } elseif (isset($_POST['remove_vg'])) {
-        $vgName = $_POST['vg_select'] ?? '';
-        $vg = escapeshellarg($vgName);
-        // collect pv names belonging to this vg so we can clear them afterwards
-        $pvLines = run_cmd("sudo pvs --noheadings -o pv_name --select vg_name=" . $vg);
-        $pvNames = array_map('trim', $pvLines);
-        $out = run_cmd("sudo vgremove -fy $vg");
-        // wipe PV metadata so they appear unused
-        foreach ($pvNames as $pvdev) {
-            if ($pvdev !== '') {
-                $out = array_merge($out, run_cmd("sudo pvremove -ff " . escapeshellarg($pvdev)));
-            }
+        $vgNames = $_POST['vg_select'] ?? [];
+        if (!is_array($vgNames)) {
+            $vgNames = [$vgNames];
         }
-        $message = implode("<br>", $out);
+        $outs = [];
+        foreach ($vgNames as $vgName) {
+            $vg = escapeshellarg($vgName);
+            // collect pv names belonging to this vg so we can report or reuse them later
+            $pvLines = run_cmd("sudo pvs --noheadings -o pv_name --select vg_name=" . $vg);
+            $pvNames = array_map('trim', $pvLines);
+            $outs = array_merge($outs, run_cmd("sudo vgremove -fy $vg"));
+            // note: we no longer wipe PV metadata here.  keeping the PV initialized
+            // allows it to be reassigned to a different group if desired.
+        }
+        $message = implode("<br>", $outs);
+        $showVgAfter = true;
+    } elseif (isset($_POST['extend_vg'])) {
+        $vgName = $_POST['vg_name'] ?? '';
+        $vg = escapeshellarg($vgName);
+        $sel = $_POST['pvs'] ?? [];
+        $pvs = implode(' ', array_map('escapeshellarg', $sel));
+        $out = run_cmd("sudo vgextend $vg $pvs");
+        if (count($out) === 0) {
+            $message = 'Volume group extended (no output).';
+        } else {
+            $message = implode("<br>", $out);
+        }
+        $showVgAfter = true;
+    } elseif (isset($_POST['extend_vg_multi'])) {
+        $vgNames = $_POST['vg_name'] ?? [];
+        if (!is_array($vgNames)) {
+            $vgNames = [$vgNames];
+        }
+        $outs = [];
+        // expect pvs array keyed by vg name
+        $pvsPost = $_POST['pvs'] ?? [];
+        foreach ($vgNames as $vgName) {
+            $vg = escapeshellarg($vgName);
+            $sel = [];
+            if (isset($pvsPost[$vgName]) && is_array($pvsPost[$vgName])) {
+                $sel = $pvsPost[$vgName];
+            }
+            if (count($sel) === 0) continue;
+            $pvs = implode(' ', array_map('escapeshellarg', $sel));
+            $outs = array_merge($outs, run_cmd("sudo vgextend $vg $pvs"));
+        }
+        if (count($outs) === 0) {
+            $message = 'Volume groups extended (no output).';
+        } else {
+            $message = implode("<br>", $outs);
+        }
+        $showVgAfter = true;
     } elseif (isset($_POST['format_lv'])) {
         $lv = escapeshellarg($_POST['lv_select2']);
         $fs = escapeshellarg($_POST['fs_type']);
@@ -185,65 +239,123 @@ $pvs = list_pvs();
 $vgs = list_vgs();
 $lvs = list_lvs();
 $disks = list_disks();
+// compute list of unused physical volumes once for use in various modals
+$unassigned = [];
+foreach ($pvs as $line) {
+    $parts = explode('|', trim($line));
+    $pv = trim($parts[0] ?? '');
+    $vg = trim($parts[1] ?? '');
+    if ($vg === '-') { $vg = ''; }
+    if ($pv !== '' && $vg === '') {
+        $unassigned[] = $pv;
+    }
+}
+
+// build a unified table of devices and PVs.  raw disks are marked
+// "available" so we can render checkboxes for initialization.
+$models = get_device_models();
+$rows = [];
+foreach ($disks as $line) {
+    $parts = explode(',', trim($line));
+    $dev = $parts[0] ?? '';
+    $size = $parts[1] ?? '';
+    if ($dev === '') continue;
+    // mark RAID devices specially
+    $model = '';
+    if (strpos($dev, '/dev/md') === 0) {
+        $model = 'Raid Device';
+    } else {
+        $model = $models[$dev] ?? '';
+    }
+    $rows[] = [
+        'device'    => $dev,
+        'model'     => $model,
+        'vg'        => '',
+        'size'      => $size,
+        'available' => true,
+    ];
+}
+foreach ($pvs as $line) {
+    $parts = explode('|', trim($line));
+    $dev = trim($parts[0] ?? '');
+    $vg  = trim($parts[1] ?? '');
+    $size= trim($parts[2] ?? '');
+    if ($dev === '') continue;
+    if ($vg === '-' ) { $vg = ''; }
+    // also mark RAID devices when they appear as PVs
+    $model = '';
+    if (strpos($dev, '/dev/md') === 0) {
+        $model = 'Raid Device';
+    } else {
+        $model = $models[$dev] ?? '';
+    }
+    $rows[] = [
+        'device'    => $dev,
+        'model'     => $model,
+        'vg'        => $vg,
+        'size'      => $size,
+        'available' => false,
+    ];
+}
+$anyAvailable = false;
+foreach ($rows as $r) {
+    if ($r['available']) { $anyAvailable = true; break; }
+}
 ?>
 
 <?php if ($message): ?>
-    <div id="initialMessage" style="display:none"><?php echo $message; ?></div>
+    <div id="initialMessage" style="display:none"<?php if ($showVgAfter) echo ' data-reopen-vg="1"'; ?>><?php echo $message; ?></div>
 <?php endif; ?>
 
+<!-- button to launch VG management modal -->
+<button id="btnShowVgModal" class="btn btn-primary mb-3">Volume groups</button>
+
 <div class="row">
-    <div class="col-md-3">
+    <div class="col-md-6">
         <div class="card mb-3">
-            <div class="card-header">Available Disks</div>
+            <div class="card-header">Disks &amp; Physical Volumes</div>
             <div class="card-body">
-                <?php if (count($disks) === 0): ?>
-                    <em>No raw disks detected.</em>
+                <?php if (count($rows) === 0): ?>
+                    <em>No disks or physical volumes detected.</em>
                 <?php else: ?>
                     <form method="post" id="initForm">
-                    <?php foreach ($disks as $line):
-                        $parts = explode(',', trim($line));
-                        $dev = $parts[0] ?? '';
-                        $size = $parts[1] ?? 'unknown';
-                        // skip if no device name
-                        if ($dev === '') continue;
-                    ?>
-                        <div class="form-check">
-                            <input class="form-check-input" name="disks[]" type="checkbox" value="<?php echo htmlspecialchars($dev); ?>" id="disk<?php echo htmlspecialchars(basename($dev)); ?>">
-                            <label class="form-check-label" for="disk<?php echo htmlspecialchars(basename($dev)); ?>"><?php echo htmlspecialchars($dev.' ('.$size.')'); ?></label>
-                        </div>
-                    <?php endforeach; ?>
-                    <button type="submit" name="init_pvs" class="btn btn-sm btn-secondary mt-2">Initialize as PV</button>
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Device</th>
+                                <th>Name/Model</th>
+                                <th>Volume group</th>
+                                <th>Size</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach ($rows as $r): ?>
+                            <tr>
+                                <td>
+                                    <?php if ($r['available']): ?>
+                                        <input type="checkbox" name="disks[]" value="<?php echo htmlspecialchars($r['device']); ?>">
+                                    <?php endif; ?>
+                                </td>
+                                <td><?php echo htmlspecialchars($r['device']); ?></td>
+                                <td><?php echo htmlspecialchars($r['model']); ?></td>
+                                <td><?php echo htmlspecialchars($r['vg']); ?></td>
+                                <td><?php echo htmlspecialchars($r['size']); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <?php if ($anyAvailable): ?>
+                        <button type="submit" name="init_pvs" class="btn btn-sm btn-secondary mt-2">Initialize as PV</button>
+                    <?php endif; ?>
                     </form>
                 <?php endif; ?>
             </div>
         </div>
     </div>
-    <!-- existing PV/VG/LV cards -->
-    <div class="col-md-3">
+    <!-- LV card remains; VG accessible via modal button -->
+    <div class="col-md-auto">
         <div class="card mb-3">
-            <div class="card-header">Physical Volumes</div>
-            <div class="card-body">
-                <?php if (count($pvs) === 0): ?>
-                    <em>No physical volumes found (unpartitioned disks will not appear).</em>
-                <?php else: ?>
-                    <pre><?php echo htmlspecialchars(implode("\n", $pvs)); ?></pre>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card mb-3">
-            <div class="card-header">Volume Groups</div>
-            <div class="card-body">
-                <?php if (count($vgs) === 0): ?>
-                    <em>No volume groups defined.</em>
-                <?php else: ?>
-                    <pre><?php echo htmlspecialchars(implode("\n", $vgs)); ?></pre>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
             <div class="card-header">Logical Volumes</div>
             <div class="card-body">
                 <?php if (count($lvs) === 0): ?>
@@ -256,42 +368,8 @@ $disks = list_disks();
     </div>
 </div>
 
+
 <div class="row">
-    <div class="col-md-6">
-        <div class="card mb-3">
-            <div class="card-header">Create Volume Group</div>
-            <div class="card-body">
-                <form method="post">
-                    <div class="mb-3">
-                        <label class="form-label">VG Name</label>
-                        <input name="vg_name" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Select PVs</label>
-                        <?php
-                    $shown=0;
-                    foreach ($pvs as $line):
-                            $parts = explode('|', trim($line));
-                            $pv = trim($parts[0] ?? '');
-                            $vg = trim($parts[1] ?? '');
-                            if ($vg === '-') { $vg = ''; }
-                            if ($vg !== '') {
-                                continue; // skip PV already in VG
-                            }
-                            if (!$pv) continue;
-                            $shown++;
-                    ?>
-                        <div class="form-check">
-                            <input class="form-check-input" name="pvs[]" type="checkbox" value="<?php echo htmlspecialchars($pv); ?>" id="pv<?php echo htmlspecialchars(basename($pv)); ?>">
-                            <label class="form-check-label" for="pv<?php echo htmlspecialchars(basename($pv)); ?>"><?php echo htmlspecialchars($pv); ?></label>
-                        </div>
-                    <?php endforeach; ?>
-                    </div>
-                    <button name="create_vg" type="submit" class="btn btn-primary">Create VG</button>
-                </form>
-            </div>
-        </div>
-    </div>
     <div class="col-md-6">
         <div class="card mb-3">
             <div class="card-header">Create Logical Volume</div>
@@ -326,46 +404,6 @@ $disks = list_disks();
 </div>
     <!-- removal/format section -->
     <div class="row">
-        <div class="col-md-6">
-            <div class="card mb-3">
-                <div class="card-header">Remove Volume / Group</div>
-                <div class="card-body">
-                    <form method="post" class="mb-3">
-                        <div class="mb-3">
-                            <label class="form-label">Select Logical Volume</label>
-                            <select name="lv_select" class="form-select">
-                                <option value="">-- none --</option>
-                                <?php foreach ($lvs as $line) {
-                                    $parts = preg_split('/\s+/', trim($line));
-                                    $lvpath = $parts[0] ?? '';
-                                    if (!$lvpath) continue;
-                                    $display = basename($lvpath);
-                                ?>
-                                <option value="<?php echo htmlspecialchars($lvpath); ?>"><?php echo htmlspecialchars($display); ?></option>
-                                <?php } ?>
-                            </select>
-                        </div>
-                        <button id="btnRemoveLv" name="remove_lv" class="btn btn-danger" type="submit">Remove LV</button>
-                    </form>
-                    <form method="post">
-                        <div class="mb-3">
-                            <label class="form-label">Select Volume Group</label>
-                            <select name="vg_select" class="form-select">
-                                <option value="">-- none --</option>
-                                <?php foreach ($vgs as $line) {
-                                    $parts = preg_split('/\s+/', trim($line));
-                                    $vgname = $parts[0] ?? '';
-                                    if (!$vgname) continue;
-                                ?>
-                                <option value="<?php echo htmlspecialchars($vgname); ?>"><?php echo htmlspecialchars($vgname); ?></option>
-                                <?php } ?>
-                            </select>
-                        </div>
-                        <button id="btnRemoveVg" name="remove_vg" class="btn btn-danger" type="submit">Remove VG</button>
-                    </form>
-                </div>
-            </div>
-        </div>
         <div class="col-md-6">
             <div class="card mb-3">
                 <div class="card-header">Format Logical Volume</div>
@@ -411,6 +449,201 @@ $disks = list_disks();
        <button type="button" class="btn btn-primary btn-ok">OK</button>
     </div>
    </div>
+  </div>
+</div>
+
+<!-- Volume Group management modal -->
+<div class="modal fade" id="vgModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Manage Volume Groups</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <?php if (count($vgs) === 0): ?>
+            <em>No volume groups defined.</em>
+        <?php else: ?>
+            <table class="table table-sm">
+                <thead>
+                    <tr><th><input type="checkbox" id="selectAllVgs"></th><th>Name</th><th>Size</th><th>Free</th></tr>
+                </thead>
+                <tbody>
+                <?php foreach ($vgs as $line):
+                    $parts = preg_split('/\s+/', trim($line));
+                    $name = $parts[0] ?? '';
+                    $size = $parts[1] ?? '';
+                    $free = $parts[2] ?? '';
+                    if (!$name) continue;
+                ?>
+                    <tr>
+                        <td><input type="checkbox" class="vg-checkbox" value="<?php echo htmlspecialchars($name); ?>"></td>
+                        <td><?php echo htmlspecialchars($name); ?></td>
+                        <td><?php echo htmlspecialchars($size); ?></td>
+                        <td><?php echo htmlspecialchars($free); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+        <div class="mt-3 text-end">
+            <button id="btnOpenCreateVg" class="btn btn-sm btn-primary">Create Volume Group</button>
+            <button id="btnExtendSelectedVgs" type="button" class="btn btn-sm btn-secondary ms-2">Extend</button>
+            <button id="btnOpenRemoveVg" class="btn btn-sm btn-danger ms-2">Remove Group</button>
+            <button type="button" class="btn btn-sm btn-secondary ms-2" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal containing create VG form -->
+<div class="modal fade" id="createVgModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Create Volume Group</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="createVgForm">
+            <div class="mb-3">
+                <label class="form-label">VG Name</label>
+                <input name="vg_name" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Select PVs</label>
+                <?php
+            $shown=0;
+            foreach ($pvs as $line):
+                    $parts = explode('|', trim($line));
+                    $pv = trim($parts[0] ?? '');
+                    $vg = trim($parts[1] ?? '');
+                    if ($vg === '-') { $vg = ''; }
+                    if ($vg !== '') {
+                        continue; // skip PV already in VG
+                    }
+                    if (!$pv) continue;
+                    $shown++;
+            ?>
+                <div class="form-check">
+                    <input class="form-check-input" name="pvs[]" type="checkbox" value="<?php echo htmlspecialchars($pv); ?>" id="pv<?php echo htmlspecialchars(basename($pv)); ?>">
+                    <label class="form-check-label" for="pv<?php echo htmlspecialchars(basename($pv)); ?>"><?php echo htmlspecialchars($pv); ?></label>
+                </div>
+            <?php endforeach; ?>
+            </div>
+            <div class="text-end">
+                <button name="create_vg" type="submit" class="btn btn-primary">Create VG</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Close</button>
+            </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal containing remove Volume Group form -->
+<div class="modal fade" id="removeVgModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Remove Volume Group</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post">
+            <div class="mb-3">
+                <label class="form-label">Select Volume Group</label>
+                <select name="vg_select" class="form-select">
+                    <option value="">-- none --</option>
+                    <?php foreach ($vgs as $line) {
+                        $parts = preg_split('/\s+/', trim($line));
+                        $vgname = $parts[0] ?? '';
+                        if (!$vgname) continue;
+                    ?>
+                    <option value="<?php echo htmlspecialchars($vgname); ?>"><?php echo htmlspecialchars($vgname); ?></option>
+                    <?php } ?>
+                </select>
+            </div>
+            <div class="text-end">
+                    <button id="btnRemoveVg" name="remove_vg" class="btn btn-danger ms-2" type="submit">Remove VG</button>
+                <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Close</button>
+            </div>
+        </form>
+      </div>
+    </div>
+    </div>
+  </div>
+</div>
+
+<!-- modal containing extend VG form -->
+<div class="modal fade" id="extendVgModal" tabindex="-1" aria-hidden="true">
+<script>
+var unassignedPvs = <?php echo json_encode($unassigned); ?>;
+</script>
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Extend Volume Group</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="extendVgForm">
+            <input type="hidden" name="vg_name" value="">
+            <div class="mb-3">
+                <label class="form-label">Select Physical Volumes to add</label>
+                <?php
+                $unassigned = [];
+                foreach ($pvs as $line) {
+                    $parts = explode('|', trim($line));
+                    $pv = trim($parts[0] ?? '');
+                    $vg = trim($parts[1] ?? '');
+                    if ($vg === '-') { $vg = ''; }
+                    if ($pv !== '' && $vg === '') {
+                        $unassigned[] = $pv;
+                    }
+                }
+                if (count($unassigned) === 0): ?>
+                    <div><em>No unused physical volumes available.</em></div>
+                <?php else:
+                    foreach ($unassigned as $pv): ?>
+                        <div class="form-check">
+                            <input class="form-check-input" name="pvs[]" type="checkbox" value="<?php echo htmlspecialchars($pv); ?>" id="extpv<?php echo htmlspecialchars(basename($pv)); ?>">
+                            <label class="form-check-label" for="extpv<?php echo htmlspecialchars(basename($pv)); ?>"><?php echo htmlspecialchars($pv); ?></label>
+                        </div>
+                    <?php endforeach;
+                endif;
+                ?>
+            </div>
+            <button name="extend_vg" type="submit" class="btn btn-primary">Add to VG</button>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- modal for extending multiple selected volume groups -->
+<div class="modal fade" id="extendSelectedVgModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Extend Selected Volume Groups</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="extendSelectedForm">
+            <!-- content populated by JS -->
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button name="extend_vg_multi" type="submit" class="btn btn-primary">Add to VGs</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
   </div>
 </div>
 
