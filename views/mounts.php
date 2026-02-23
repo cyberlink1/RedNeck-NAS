@@ -246,6 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (strpos($statusMsg,'Mount succeeded') === 0) {
             $message = $statusMsg;
         } else {
+            $out[] = $statusMsg;
             $message = implode("<br>", $out);
         }
     }
@@ -341,6 +342,25 @@ foreach ($mnts as $m) {
         $mounts[] = ['dev' => $mm[1], 'pt' => $pt, 'opts' => '', 'fstab' => $inFstab];
     }
 }
+// eliminate duplicate entries for the same mount point, keeping the last
+// occurrence (which should reflect the most recent state).
+if (count($mounts) > 1) {
+    $seen = [];
+    $filtered = [];
+    for ($i = count($mounts) - 1; $i >= 0; $i--) {
+        $m = $mounts[$i];
+        if (!isset($seen[$m['pt']])) {
+            $seen[$m['pt']] = true;
+            array_unshift($filtered, $m);
+        }
+    }
+    $mounts = $filtered;
+}
+// if we ended up with no rows yet mount command returned something, warn
+if (count($mounts) === 0 && count($mnts) > 0) {
+    $message .= '<br><strong>debug:</strong> mount list parsed but produced no rows:<br>'
+              . htmlspecialchars(implode("<br>", $mnts));
+}
 ?>
 
 <?php if ($message): ?>
@@ -413,14 +433,16 @@ foreach ($mnts as $m) {
             </div>
             <div class="mb-3">
                 <label class="form-label">Mount options</label>
+                <div class="d-flex flex-column">
                 <?php
                 $optChoices = ['rw' => 'Read/write', 'ro' => 'Read-only', 'noexec' => 'No exec', 'nosuid' => 'No suid', 'nodev' => 'No dev'];
                 foreach ($optChoices as $opt => $label): ?>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" name="mount_opts[]" value="<?php echo htmlspecialchars($opt); ?>" id="opt_<?php echo htmlspecialchars($opt); ?>">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="mount_opts[]" value="<?php echo htmlspecialchars($opt); ?>" id="opt_<?php echo htmlspecialchars($opt); ?>"<?php if (in_array($opt, ['rw','noexec','nodev'], true)) echo ' checked'; ?>>
                         <label class="form-check-label" for="opt_<?php echo htmlspecialchars($opt); ?>"><?php echo htmlspecialchars($label); ?></label>
                     </div>
                 <?php endforeach; ?>
+                </div>
             </div>
             <div class="mb-3 form-check">
                 <input type="checkbox" class="form-check-input" name="mount_boot" id="mountBoot">
@@ -450,13 +472,15 @@ foreach ($mnts as $m) {
             </div>
             <div class="mb-3">
                 <label class="form-label">Mount options</label>
+                <div class="d-flex flex-column">
                 <?php
                 foreach ($optChoices as $opt => $label): ?>
-                    <div class="form-check form-check-inline">
+                    <div class="form-check">
                         <input class="form-check-input" type="checkbox" name="mount_opts[]" value="<?php echo htmlspecialchars($opt); ?>" id="edit_opt_<?php echo htmlspecialchars($opt); ?>">
                         <label class="form-check-label" for="edit_opt_<?php echo htmlspecialchars($opt); ?>"><?php echo htmlspecialchars($label); ?></label>
                     </div>
                 <?php endforeach; ?>
+                </div>
             </div>
             <div class="mb-3 form-check">
                 <input type="checkbox" class="form-check-input" name="mount_boot" id="editMountBoot">
