@@ -199,6 +199,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (titleElt) {
                     titleElt.textContent = 'Edit mount ' + dev;
                 }
+            });
+        });
+    }
+
+    // confirmation for export removal buttons
+    document.querySelectorAll('.btn-remove-export').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            var form = btn.closest('form');
+            showConfirmation('Remove this export entry? This will update /etc/exports.', function() {
+                form.submit();
+            });
+        });
+    });
                 // strip leading /export/ from mount point for display
                 form.mount_point.value = pt.replace(/^\/export\//, '');
                 form.mount_boot.checked = inFstab;
@@ -1431,6 +1445,19 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+
+    // prepare create-export modal on show
+    var createExportModal = document.getElementById('createExportModal');
+    if (createExportModal) {
+        createExportModal.addEventListener('show.bs.modal', function() {
+            var form = document.getElementById('createExportForm');
+            if (!form) return;
+            form.reset();
+            // ensure rw radio is checked by default
+            var rw = form.querySelector('input[name="opt_rw_ro"][value="rw"]');
+            if (rw) rw.checked = true;
+        });
+    }
 
     // unmount buttons in mounts table
     var umountRowButtons = document.querySelectorAll('.btn-umount-row');

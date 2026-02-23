@@ -9,7 +9,8 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 - `sudo` privileges or root access for the PHP process to run `getent shadow` and LVM/NFS commands
 - LVM utilities (`pvs`, `vgs`, `lvs`, `vgcreate`, `lvcreate` etc.)
 - `mdadm` for RAID creation
-- NFS utils (`exportfs`)
+- NFS utils (`exportfs`, provided by `nfs-kernel-server`/`nfs-common`)
+- `nsenter` (from `util-linux`; used to inspect the host's mount namespace so all `/export/*` mounts are detected)
 - `parted`, `gdisk`/`sgdisk` and `wipefs` for disk partitioning and wiping
 - `smartmontools` for SMART status
 
@@ -21,6 +22,7 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 www-data ALL=(ALL) NOPASSWD: \
     /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
     /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/rmdir, \
+    /usr/sbin/exportfs, \
     /usr/sbin/parted, /usr/sbin/sgdisk, /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, \  # tee needed for adding fstab entries
     /usr/bin/pamtester, /usr/bin/python3, /usr/bin/perl, /bin/echo, \
     /bin/cat, /bin/grep
@@ -120,7 +122,7 @@ www-data ALL=(ALL) NOPASSWD: \
   A new **Logical volumes** button sits beside the VG control. Clicking it reveals a modal containing the same information as the standalone logical‑volumes card; action buttons for create, format and remove appear in the footer next to the Close button. The **Create** button spawns a second modal with the familiar create‑LV form. **Format** now presents a dialog listing all selected volumes (checkboxes are provided in the LV table) and offers a filesystem dropdown populated automatically from `/sbin/mkfs.*`; choose the type and submit to format all checked LVs. Remove continues to work on the first chosen volume. All sub‑dialogs confirm before submitting. The list of LVs updates on reload and the parent modal is restored after you close any sub‑dialog.
 
 The logical‑volumes card will expand horizontally as needed to accommodate long names, preventing a nested horizontal scrollbar. Initialize PVs from available disks, create VGs, and carve out LVs (the `lvcreate` command uses `-y -Z y` to erase signatures). Format or delete LVs, with filesystem UUIDs shown when available. Logical volumes must be formatted before mounting via the Mounts view. Removal and formatting actions occur here; details on mount/unmount behaviour are described in the dashboard section above.
-- **NFS**: List current exports, add or remove exports. Changes are applied immediately via `exportfs -ra`.
+- **NFS**: List current exports in a structured table (directory, mounted device, client and options), add or remove individual client entries. The table has a **Create export** button above it; creating a new export opens a modal where you choose one of the mounted `/export/*` directories, specify the client and toggle from a comprehensive set of NFS options (rw/ro, squash rules, sync/async, subtree checking, fsid, crossmnt/nohide, write‑delay flags, anonymous UID/GID, etc.).  Changes are applied immediately via `exportfs -ra`.
 
 > ⚠️ All operations are potentially destructive. Use with care.
 
