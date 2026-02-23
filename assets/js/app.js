@@ -199,6 +199,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (titleElt) {
                     titleElt.textContent = 'Edit mount ' + dev;
                 }
+                // strip leading /export/ from mount point for display
+                form.mount_point.value = pt.replace(/^\/export\//, '');
+                form.mount_boot.checked = inFstab;
+                // set option checkboxes
+                form.querySelectorAll('input[name="mount_opts[]"]').forEach(function(cb) {
+                    cb.checked = opts.split(',').includes(cb.value);
+                });
+                new bootstrap.Modal(document.getElementById('editMountModal')).show();
             });
         });
     }
@@ -213,17 +221,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
-                // strip leading /export/ from mount point for display
-                form.mount_point.value = pt.replace(/^\/export\//, '');
-                form.mount_boot.checked = inFstab;
-                // set option checkboxes
-                form.querySelectorAll('input[name="mount_opts[]"]').forEach(function(cb) {
-                    cb.checked = opts.split(',').includes(cb.value);
-                });
-                new bootstrap.Modal(document.getElementById('editMountModal')).show();
-            });
-        });
-    }
     // confirm format and removal forms
     var formatLvForm = document.getElementById('formatLvForm');
     if (formatLvForm) {
@@ -1410,6 +1407,7 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+    }
 
     // Create RAID button uses data-bs attributes; no additional JS needed here
 
@@ -1446,17 +1444,97 @@ window.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // prepare create-export modal on show
+    // prepare create-export modal on show, including client table logic
+    function addClientRow(client, opts) {
+        var tbody = document.querySelector('#clientTable tbody');
+        if (!tbody) return;
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td class="client-cell">'+(client||'')+'</td>' +
+                       '<td class="opts-cell">'+(opts||'')+'</td>' +
+                       '<td>' +
+                         '<button type="button" class="btn btn-sm btn-secondary btn-edit-client">&#9998;</button> ' +
+                         '<button type="button" class="btn btn-sm btn-danger btn-del-client">&times;</button>' +
+                       '</td>';
+        tbody.appendChild(tr);
+        tr.querySelector('.btn-del-client').addEventListener('click', function() {
+            tr.remove();
+        });
+        tr.querySelector('.btn-edit-client').addEventListener('click', function() {
+            showClientModal(function(c,o){
+                tr.querySelector('.client-cell').textContent = c;
+                tr.querySelector('.opts-cell').textContent = o;
+            }, client, opts);
+        });
+    }
+
     var createExportModal = document.getElementById('createExportModal');
     if (createExportModal) {
         createExportModal.addEventListener('show.bs.modal', function() {
-            var form = document.getElementById('createExportForm');
+                var form = document.getElementById('createExportForm');
             if (!form) return;
             form.reset();
-            // ensure rw radio is checked by default
-            var rw = form.querySelector('input[name="opt_rw_ro"][value="rw"]');
-            if (rw) rw.checked = true;
+            // clear table and add initial blank row
+            var tbody = document.querySelector('#clientTable tbody');
+            if (tbody) tbody.innerHTML = '';
+            addClientRow();
         });
+        // bind add button once
+        var addBtn = document.getElementById('addClientBtn');
+        if (addBtn) {
+            addBtn.onclick = function() {
+                showClientModal(function(c,o){ addClientRow(c,o); });
+            };
+        }
+        // client-entry modal helper
+        function showClientModal(onSave, initialClient, initialOpts) {
+            var clientModal = document.getElementById('clientEntryModal');
+            if (!clientModal) return;
+            var addr = document.getElementById('clientAddr');
+            var opts = document.getElementById('clientOpts');
+            addr.value = initialClient || '';
+            opts.value = initialOpts || '';
+            var form = document.getElementById('clientForm');
+            var handler = function(e) {
+                e.preventDefault();
+                var c = addr.value.trim();
+                var o = opts.value.trim();
+                if (c) {
+                    onSave(c, o);
+                }
+                var bs = bootstrap.Modal.getInstance(clientModal);
+                if (bs) bs.hide();
+            };
+            form.addEventListener('submit', handler, {once:true});
+            new bootstrap.Modal(clientModal).show();
+        }
+        // build export_line on submit
+        var createForm = document.getElementById('createExportForm');
+        if (createForm) {
+            createForm.addEventListener('submit', function(e) {
+                var dir = createForm.export_dir.value.trim();
+                if (!dir) {
+                    e.preventDefault();
+                    showConfirmation('Please select a directory to export.');
+                    return;
+                }
+                var clients = [];
+                document.querySelectorAll('#clientTable tbody tr').forEach(function(row) {
+                    var c = row.querySelector('.client-cell').textContent.trim();
+                    var o = row.querySelector('.opts-cell').textContent.trim();
+                    if (c) {
+                        if (o) clients.push(c + '(' + o + ')');
+                        else clients.push(c);
+                    }
+                });
+                if (clients.length === 0) {
+                    e.preventDefault();
+                    showConfirmation('Please add at least one client entry.');
+                    return;
+                }
+                createForm.export_line.value = dir + ' ' + clients.join(' ');
+                // comment is handled server-side separately
+            });
+        }
     }
 
     // unmount buttons in mounts table
@@ -1469,8 +1547,7 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
-    // end if(form) block
-    }
+
 });
 
 // fallback VG button binder in case DOMContentLoaded handlers missed it

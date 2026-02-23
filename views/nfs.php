@@ -84,6 +84,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($line !== '') {
+            // optionally write a comment first
+            if (!empty($_POST['export_comment'])) {
+                $comment = trim($_POST['export_comment']);
+                if ($comment !== '') {
+                    $cEsc = escapeshellarg('# ' . $comment);
+                    run_cmd("echo $cEsc | sudo -n tee -a $exportsPath >/dev/null");
+                }
+            }
             // append via sudo tee so www-data doesn't need write permission
             $esc = escapeshellarg($line);
             run_cmd("echo $esc | sudo -n tee -a $exportsPath >/dev/null");
@@ -258,6 +266,10 @@ foreach ($entries as $e) {
     <div class="modal-body">
       <form id="createExportForm" method="post">
             <div class="mb-3">
+                <label class="form-label">Comment (optional)</label>
+                <input name="export_comment" class="form-control" placeholder="Add a comment line">
+            </div>
+            <div class="mb-3">
                 <label class="form-label">Directory to export</label>
                 <select name="export_dir" class="form-select" required>
                     <option value="">(select)</option>
@@ -267,87 +279,44 @@ foreach ($entries as $e) {
                 </select>
             </div>
             <div class="mb-3">
-                <label class="form-label">Client (host/subnet)</label>
-                <input name="export_client" class="form-control" placeholder="e.g. 192.168.1.0/24" required>
+                <label class="form-label">Clients / options</label>
+                <table class="table table-sm" id="clientTable">
+                    <thead>
+                        <tr><th>Client</th><th>Options</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+                <button type="button" id="addClientBtn" class="btn btn-sm btn-secondary">+ Add client</button>
             </div>
-            <fieldset class="mb-3">
-                <legend class="form-label">Options</legend>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="opt_rw_ro" id="opt_rw" value="rw" checked>
-                    <label class="form-check-label" for="opt_rw">rw</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="opt_rw_ro" id="opt_ro" value="ro">
-                    <label class="form-check-label" for="opt_ro">ro</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_noaccess" id="opt_noaccess">
-                    <label class="form-check-label" for="opt_noaccess">noaccess</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_root_squash" id="opt_root_squash">
-                    <label class="form-check-label" for="opt_root_squash">root_squash</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_no_root_squash" id="opt_no_root_squash">
-                    <label class="form-check-label" for="opt_no_root_squash">no_root_squash</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_all_squash" id="opt_all_squash">
-                    <label class="form-check-label" for="opt_all_squash">all_squash</label>
-                </div>
-                <div class="row">
-                    <div class="col mb-2">
-                        <label class="form-label" for="opt_anonuid">anonuid</label>
-                        <input type="number" class="form-control" name="opt_anonuid" id="opt_anonuid" placeholder="UID">
-                    </div>
-                    <div class="col mb-2">
-                        <label class="form-label" for="opt_anongid">anongid</label>
-                        <input type="number" class="form-control" name="opt_anongid" id="opt_anongid" placeholder="GID">
-                    </div>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_sync" id="opt_sync">
-                    <label class="form-check-label" for="opt_sync">sync</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_async" id="opt_async">
-                    <label class="form-check-label" for="opt_async">async</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_subtree_check" id="opt_subtree_check">
-                    <label class="form-check-label" for="opt_subtree_check">subtree_check</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_no_subtree_check" id="opt_no_subtree_check">
-                    <label class="form-check-label" for="opt_no_subtree_check">no_subtree_check</label>
-                </div>
-                <div class="row mb-2">
-                    <div class="col">
-                        <label class="form-label" for="opt_fsid">fsid</label>
-                        <input type="text" class="form-control" name="opt_fsid" id="opt_fsid" placeholder="0 or N">
-                    </div>
-                    <div class="col">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="opt_crossmnt" id="opt_crossmnt">
-                            <label class="form-check-label" for="opt_crossmnt">crossmnt</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="opt_nohide" id="opt_nohide">
-                            <label class="form-check-label" for="opt_nohide">nohide</label>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_no_wdelay" id="opt_no_wdelay">
-                    <label class="form-check-label" for="opt_no_wdelay">no_wdelay</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="opt_wdelay" id="opt_wdelay">
-                    <label class="form-check-label" for="opt_wdelay">wdelay</label>
-                </div>
-            </fieldset>
+            <input type="hidden" name="export_line" id="export_line">
             <button name="add_export" type="submit" class="btn btn-primary">Create</button>
+      </form>
+    </div>
+   </div>
+  </div>
+</div>
+
+<!-- client entry modal -->
+<div class="modal fade" id="clientEntryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Client entry</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+      <form id="clientForm">
+        <div class="mb-3">
+          <label class="form-label" for="clientAddr">Client (host or subnet)</label>
+          <input type="text" id="clientAddr" class="form-control" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="clientOpts">Options</label>
+          <input type="text" id="clientOpts" class="form-control" placeholder="e.g. rw,sync">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">OK</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
       </form>
     </div>
    </div>
