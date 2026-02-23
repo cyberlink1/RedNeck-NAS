@@ -430,9 +430,19 @@ foreach ($mdlines as $line) {
     }
 }
 
-// collect LVM PVs
-$pvLines = run_cmd('sudo pvs --noheadings -o pv_name');
-$pvNames = array_map('trim', $pvLines);
+// collect LVM PVs along with their volume group names
+// we'll build a map so we can show which VG (if any) owns a given PV.
+$pvmap = [];
+$pvLines = run_cmd('sudo pvs --noheadings -o pv_name,vg_name --separator="|"');
+foreach ($pvLines as $pl) {
+    $parts = explode('|', trim($pl));
+    $dev = $parts[0] ?? '';
+    $vg = $parts[1] ?? '';
+    if ($dev !== '') {
+        $pvmap[$dev] = $vg;
+    }
+}
+$pvNames = array_keys($pvmap);
 
 // helper to check if disk should have partition/wipe actions
 function disk_in_use($dev, $mdmembers, $pvNames) {
@@ -666,6 +676,7 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
                                     <th>Device</th>
                                     <th>Name/Model</th>
                                     <th>Size</th>
+                                    <th>Used by</th>
                                     <th>Status</th>
                                 </tr>
                             </thead>
@@ -682,10 +693,9 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
                                 if ($dev === $osDisk) {
                                     $status[] = 'OS disk';
                                 }
-                                if (strpos($dev, '/dev/md') === 0) {
-                                    $status[] = 'RAID device';
-                                } elseif (!empty($mdmap[$dev])) {
-                                    $status[] = 'member of '.implode(',', $mdmap[$dev]);
+                                // any involvement with an MD RAID should be marked Raid
+                                if (strpos($dev, '/dev/md') === 0 || !empty($mdmap[$dev])) {
+                                    $status[] = 'Raid';
                                 }
                                 if (in_array($dev, $pvNames, true)) {
                                     $status[] = 'LVM PV';
@@ -693,10 +703,28 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
                                 $statusStr = $status ? implode('; ', $status) : '';
                                 $rowClass = ($dev === $selected) ? 'table-active' : '';
                             ?>
-                                <tr class="<?php echo $rowClass; ?>" data-dev="<?php echo htmlspecialchars($dev); ?>" data-name="<?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?>" data-size="<?php echo htmlspecialchars($size); ?>" data-status="<?php echo htmlspecialchars($statusStr); ?>">
+                                <?php
+                                // compute "used by" info: list md arrays or VG owning PV
+                                $usedBy = '';
+                                // if this row itself is an md device, mark it as RAID here too
+                                if (strpos($dev, '/dev/md') === 0) {
+                                    $usedBy = 'Raid';
+                                }
+                                if (!empty($mdmap[$dev])) {
+                                    $usedBy = implode(',', $mdmap[$dev]);
+                                }
+                                if (isset($pvmap[$dev]) && $pvmap[$dev] !== '') {
+                                    if ($usedBy !== '') {
+                                        $usedBy .= '; ';
+                                    }
+                                    $usedBy .= $pvmap[$dev];
+                                }
+                            ?>
+                            <tr class="<?php echo $rowClass; ?>" data-dev="<?php echo htmlspecialchars($dev); ?>" data-name="<?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?>" data-size="<?php echo htmlspecialchars($size); ?>" data-status="<?php echo htmlspecialchars($statusStr); ?>" data-usedby="<?php echo htmlspecialchars($usedBy); ?>">
                                     <td><?php echo htmlspecialchars($dev); ?></td>
                                     <td><?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?></td>
                                     <td><?php echo htmlspecialchars($size); ?></td>
+                                    <td><?php echo htmlspecialchars($usedBy); ?></td>
                                     <td><?php echo htmlspecialchars($statusStr); ?></td>
                                 </tr>
                             <?php endforeach; ?>

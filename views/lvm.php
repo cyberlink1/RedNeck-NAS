@@ -496,7 +496,8 @@ sort($fsTypes);
                     $lvattr = $parts[3] ?? '';
                     $lvlayout = $parts[4] ?? '';
                     if (!$lvpath) continue;
-                    $display = basename($lvpath);
+                    // show the full device path instead of just the basename
+                    $display = $lvpath;
                     // omit snapshots from the main LV list; they appear as
                     // logical volumes too but users should manage them via the
                     // snapshot modal.  snapshot LVs have an attr starting with 's'
@@ -696,7 +697,8 @@ sort($fsTypes);
                         if (!$lvpath) continue;
                         $lvlayout = $parts[4] ?? '';
                         if (strpos($lvlayout, 'thin') !== false && strpos($lvlayout, 'pool') !== false) continue;
-                        $display = basename($lvpath);
+                        // use full path in dropdown as well for clarity
+                        $display = $lvpath;
                     ?>
                     <option value="<?php echo htmlspecialchars($lvpath); ?>"><?php echo htmlspecialchars($display); ?></option>
                     <?php } ?>
