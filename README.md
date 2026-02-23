@@ -53,7 +53,10 @@ www-data ALL=(ALL) NOPASSWD: \
    abort early with a clear warning asking you to remove any logical volumes and
    volume groups first; the array stop is not attempted until the LVM stack is
    gone.  (Previous behaviour attempted to remove the array anyway and could
-   result in a misleading "Cannot get exclusive access" error.)  When building a
+   result in a misleading "Cannot get exclusive access" error.)  If the RAID
+   device happens to contain residual PV metadata but isn’t actually part of a
+   group, the interface will automatically run `pvremove` on it before proceeding
+   so you don’t have to clean up manually.  When building a
    new RAID the form now filters out a few additional harmless messages such as
    `Unrecognised md component device` and the "Defaulting to version" line so
    the feedback area only shows meaningful results.  If you stop arrays manually

@@ -916,6 +916,8 @@ function attachDiskHandlers(root) {
                 showConfirmation(msgText, function() {
                     var f = document.createElement('form');
                     f.method = 'post';
+                    // ensure we POST back to the current page (including query args)
+                    f.action = window.location.pathname + window.location.search;
                     f.style.display = 'none';
                     var inp = document.createElement('input');
                     inp.type = 'hidden';
@@ -1355,6 +1357,8 @@ window.addEventListener('DOMContentLoaded', function() {
                 inp.name = btn.name;
                 inp.value = btn.value || '';
                 btn.form.appendChild(inp);
+                // make sure the form action is correct
+                btn.form.action = window.location.pathname + window.location.search;
                 btn.form.submit();
             });
         });
@@ -1465,6 +1469,7 @@ window.addEventListener('DOMContentLoaded', function() {
         var text = msgEl.innerHTML;
         var reopenVg = msgEl.dataset.reopenVg === '1';
         var reopenLv = msgEl.dataset.reopenLv === '1';
+        var reload = msgEl.dataset.reload === '1';
         if (text) {
             showConfirmation(text, function() {
                 if (reopenVg) {
@@ -1473,6 +1478,10 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (reopenLv) {
                     new bootstrap.Modal(document.getElementById('lvModal')).show();
                 }
+                if (reload) {
+                    // ensure the table reflects any changes (e.g. raid removed)
+                    window.location.reload();
+                }
             });
         } else {
             if (reopenVg) {
@@ -1480,6 +1489,9 @@ window.addEventListener('DOMContentLoaded', function() {
             }
             if (reopenLv) {
                 new bootstrap.Modal(document.getElementById('lvModal')).show();
+            }
+            if (reload) {
+                window.location.reload();
             }
         }
         msgEl.parentNode.removeChild(msgEl);

@@ -322,18 +322,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif (isset($_POST['remove_raid'])) {
         $raid = trim($_POST['raid_select'] ?? '');
+        @file_put_contents('/tmp/raid_debug.log', date('[Y-m-d H:i:s] ') . "remove_raid POST received raid=" . var_export($raid, true) . "\n", FILE_APPEND);
         if ($raid === '') {
             $message = 'No RAID device selected.';
         } else {
+            $reloadAfter = false; // flag that we should refresh the page when the message is dismissed
             $msgs = [];
             $raidName = preg_replace('#^/dev/#','',$raid);
             $raidPath = "/dev/" . $raidName;
-            $pvcheck = run_cmd("sudo pvs --noheadings -o pv_name --select pv_name=" . escapeshellarg($raidPath));
-            $pvcheck = array_filter(array_map('trim', $pvcheck), function($v){ return strpos($v, '/dev/') === 0; });
-            if (count($pvcheck) > 0) {
-                $msgs[] = 'RAID device ' . htmlspecialchars($raidPath) . ' is still part of an LVM PV. ' .
-                         'Remove any logical volumes and volume groups using it, then try again.';
-                $message = implode("<br>", $msgs);
+
+            // ask pvs for vg_name as well so we can distinguish a stray PV with
+            // no associated volume group (which is safe to clear) from one that's
+            // actually in use.
+            $pvinfo = run_cmd("sudo pvs --noheadings -o pv_name,vg_name --separator='|' --select pv_name=" . escapeshellarg($raidPath));
+            $pvinfo = array_map('trim', $pvinfo);
+            @file_put_contents('/tmp/raid_debug.log', date('[Y-m-d H:i:s] ') . "pvinfo for $raidPath: " . implode(';', $pvinfo) . "\n", FILE_APPEND);
+            // filter blank lines
+            $pvinfo = array_filter($pvinfo, function($v){ return $v !== ''; });
+
+            if (!empty($pvinfo)) {
+                // parse each line, check for vg_name
+                $inUse = false;
+                $linesMsg = [];
+                foreach ($pvinfo as $line) {
+                    list($pv, $vg) = explode('|', $line . '|');
+                    $pv = trim($pv);
+                    $vg = trim($vg);
+                    // show pv and vg name for diagnostics
+                    $linesMsg[] = htmlspecialchars($pv . ' -> vg=' . $vg);
+                    if ($vg !== '') {
+                        $inUse = true;
+                    }
+                }
+                if ($inUse) {
+                    $msgs[] = 'RAID device ' . htmlspecialchars($raidPath) . ' is still part of an LVM physical volume belonging to a volume group:';
+                    $msgs = array_merge($msgs, $linesMsg);
+                    $msgs[] = 'Remove the associated logical volumes/volume group before deleting the array.';
+                    $message = implode("<br>", $msgs);
+                } else {
+                    // PV exists but not assigned to any VG; remove it automatically
+                    $msgs[] = 'Found leftover LVM PV metadata on ' . htmlspecialchars($raidPath) . '. Clearing it now.';
+                    $outPv = run_cmd("sudo pvremove -ffy " . escapeshellarg($raidPath));
+                    $msgs = array_merge($msgs, array_map('htmlspecialchars',$outPv));
+                    $message = implode("<br>", $msgs);
+                    // continue with remove; don't set $message yet, we'll build it later
+                    $pvinfo = [];
+                }
+            }
+            if (!empty($pvinfo)) {
+                // still something left, abort removal
+                // (message already set above)
             } else {
                 $members = [];
                 $detail = run_cmd("sudo mdadm --detail " . escapeshellarg($raidPath));
@@ -352,10 +390,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $out = array_filter($out, function($line){
                     return strpos($line, 'No such file or directory') === false;
                 });
+
                 $msgs[] = implode("<br>", $out);
-                $msgs[] = 'RAID array ' . htmlspecialchars($raidPath) . ' removed successfully.';
+                // verify that the array really went away
+                $still = file_exists($raidPath) ||
+                         preg_match('/' . preg_quote(basename($raidPath), '/') . '/', implode("\n", $out));
+                if ($still) {
+                    $msgs[] = 'ERROR: RAID array ' . htmlspecialchars($raidPath) . ' still appears to exist; removal may have failed.';
+                } else {
+                    $msgs[] = 'RAID array ' . htmlspecialchars($raidPath) . ' removed successfully.';
+                    $reloadAfter = true;
+                }
                 $message = implode("<br>", $msgs);
                 @file_put_contents('/tmp/raid_debug.log', date('[Y-m-d H:i:s] ') . "actual removal output:\n" . implode("\n", $out) . "\n", FILE_APPEND);
+            }
+            if (!empty($reloadAfter)) {
+                // trick the frontend into refreshing after the confirmation dialog
+                $message = '<span data-reload="1"></span>' . $message;
             }
         }
     }
@@ -434,7 +485,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 ?>
 
 <?php if ($message): ?>
-    <div id="initialMessage" class="d-none"><?php echo $message; ?></div>
+    <div id="initialMessage" class="d-none"<?php if (strpos($message,'data-reload="1"') !== false) echo ' data-reload="1"'; ?>><?php echo $message; ?></div>
 <?php endif; ?>
 
 
