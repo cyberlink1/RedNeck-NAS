@@ -44,6 +44,12 @@ body {
     cursor: pointer;
 }
 
+/* make the large statistic numbers stand out */
+.stat-card .stat-number {
+    font-size: 3rem;
+    font-weight: bold;
+}
+
 /* simple full-screen spinner overlay used during long operations */
 #spinnerOverlay {
     position: fixed;

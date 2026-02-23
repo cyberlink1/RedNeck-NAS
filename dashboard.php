@@ -31,12 +31,62 @@ if ($view === 'lvm' && isset($_GET['ajax']) && $_GET['ajax'] === 'list_snaps' &&
 // prepare data structures; default to empty so count() never errors
 $lvs = [];
 $mnts = [];
-// collect summary info when rendering the root dashboard
+// additional summary counts (only for root dashboard)
+$totalDrives = 0;
+$raidCount = 0;
+$exportCount = 0;
+$exports = [];
 if ($view === '') {
+    // existing LV and mount listing
     $lvs = run_cmd('sudo lvs --noheadings -o lv_path,vg_name,lv_size');
     $mnts = run_cmd("mount | grep ' on /export/'");
     // strip the lone "(exit N)" record that grep emits when nothing matched
     $mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
+
+    // count physical drives (lsblk shows TYPE column). we want to omit the
+    // disk containing the root filesystem. determine its parent disk via
+    // findmnt; fallback to no exclusion if the command fails.
+    $osDev = '';
+    $rootSrc = run_cmd("findmnt -n -o SOURCE /");
+    if (!empty($rootSrc)) {
+        // source might be /dev/sda1 or UUID=...; only handle /dev/*
+        if (preg_match('#^/dev/([a-zA-Z0-9]+)#', trim($rootSrc[0]), $m)) {
+            $osDev = $m[1];
+            // strip trailing digits to get whole-disk name if necessary
+            $osDev = preg_replace('/\d+$/', '', $osDev);
+        }
+    }
+    $disklines = run_cmd('sudo lsblk -dn -o NAME,TYPE');
+    foreach ($disklines as $line) {
+        if (preg_match('/\sdisk$/', trim($line))) {
+            $fields = preg_split('/\s+/', trim($line));
+            $name = $fields[0];
+            if ($osDev !== '' && $name === $osDev) {
+                continue;
+            }
+            $totalDrives++;
+        }
+    }
+
+    // count RAID arrays by listing /dev/md*
+    $mds = run_cmd('ls -1 /dev/md* 2>/dev/null');
+    foreach ($mds as $line) {
+        if (preg_match('#^/dev/md#', trim($line))) {
+            $raidCount++;
+        }
+    }
+
+    // count exports ignoring comments/blank lines
+    $expFile = '/etc/exports';
+    if (file_exists($expFile)) {
+        $lines = file($expFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $l) {
+            $t = trim($l);
+            if ($t === '' || strpos($t, '#') === 0) continue;
+            $exports[] = $t;
+        }
+    }
+    $exportCount = count($exports);
 }
 ?>
 
@@ -70,28 +120,44 @@ if ($view === '') {
     </nav>
     <div class="container mt-4">
         <?php if ($view === ''): ?>
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="card mb-3">
-                        <div class="card-header">Logical Volumes</div>
+            <div class="row text-center">
+                <div class="col-sm-6 col-md-4 col-lg-2 mb-3">
+                    <div class="card stat-card">
+                        <div class="card-header">Physical Drives</div>
                         <div class="card-body">
-                            <?php if (count($lvs) === 0): ?>
-                                <em>No logical volumes found.</em>
-                            <?php else: ?>
-                                <pre><?php echo htmlspecialchars(implode("\n", $lvs)); ?></pre>
-                            <?php endif; ?>
+                            <div class="stat-number"><?php echo $totalDrives; ?></div>
                         </div>
                     </div>
                 </div>
-                <div class="col-md-auto">
-                    <div class="card mb-3">
+                <div class="col-sm-6 col-md-4 col-lg-2 mb-3">
+                    <div class="card stat-card">
+                        <div class="card-header">RAID Arrays</div>
+                        <div class="card-body">
+                            <div class="stat-number"><?php echo $raidCount; ?></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-md-4 col-lg-2 mb-3">
+                    <div class="card stat-card">
+                        <div class="card-header">Logical Volumes</div>
+                        <div class="card-body">
+                            <div class="stat-number"><?php echo count($lvs); ?></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-md-4 col-lg-2 mb-3">
+                    <div class="card stat-card">
                         <div class="card-header">Mounts</div>
                         <div class="card-body">
-                            <?php if (count($mnts) === 0): ?>
-                                <em>No /export mounts found.</em>
-                            <?php else: ?>
-                                <pre><?php echo htmlspecialchars(implode("\n", $mnts)); ?></pre>
-                            <?php endif; ?>
+                            <div class="stat-number"><?php echo count($mnts); ?></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-md-4 col-lg-2 mb-3">
+                    <div class="card stat-card">
+                        <div class="card-header">Exports</div>
+                        <div class="card-body">
+                            <div class="stat-number"><?php echo $exportCount; ?></div>
                         </div>
                     </div>
                 </div>

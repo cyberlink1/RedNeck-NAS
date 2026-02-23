@@ -26,3 +26,4 @@ any time you add a new shell command that will require root access, update the i
 All js must be in js files, NO inline JavaScript!
 All CSS must be in the site CSS file, NO inline CSS!
 Always lint your code.
+Do not do git functions without being asked.
