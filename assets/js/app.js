@@ -177,6 +177,39 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    // make mount table rows clickable for editing
+    var mountTable = document.getElementById('mountTable');
+    if (mountTable) {
+        document.querySelectorAll('#mountTable tbody tr').forEach(function(row) {
+            row.addEventListener('click', function(e) {
+                // ignore clicks on buttons/forms inside the row (eg unmount)
+                if (e.target.closest('button') || e.target.closest('form')) {
+                    return;
+                }
+                var dev = row.getAttribute('data-dev');
+                var pt  = row.getAttribute('data-pt');
+                var opts = row.getAttribute('data-opts') || '';
+                var inFstab = row.getAttribute('data-infstab') === '1';
+                var form = document.getElementById('editMountForm');
+                if (!form) return;
+                form.device.value = dev;
+                // update title with device
+                var titleElt = document.getElementById('editMountModalTitle');
+                if (titleElt) {
+                    titleElt.textContent = 'Edit mount ' + dev;
+                }
+                // strip leading /export/ from mount point for display
+                form.mount_point.value = pt.replace(/^\/export\//, '');
+                form.mount_boot.checked = inFstab;
+                // set option checkboxes
+                form.querySelectorAll('input[name="mount_opts[]"]').forEach(function(cb) {
+                    cb.checked = opts.split(',').includes(cb.value);
+                });
+                new bootstrap.Modal(document.getElementById('editMountModal')).show();
+            });
+        });
+    }
     // confirm format and removal forms
     var formatLvForm = document.getElementById('formatLvForm');
     if (formatLvForm) {
@@ -1394,6 +1427,17 @@ window.addEventListener('DOMContentLoaded', function() {
             e.preventDefault();
             showConfirmation('Remove this NFS export?', function() {
                 // button name/value already in form
+                btn.form.submit();
+            });
+        });
+    });
+
+    // unmount buttons in mounts table
+    var umountRowButtons = document.querySelectorAll('.btn-umount-row');
+    umountRowButtons.forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfirmation('Unmount this export?\nAny users accessing it will be disconnected.', function() {
                 btn.form.submit();
             });
         });

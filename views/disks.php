@@ -80,7 +80,8 @@ $selected = $_REQUEST['disk'] ?? '';
 // detect whether selected device is part of md or lvm so we can
 // disable partitioning/wiping actions later
 $inMd = false;
-$inLvm = false;
+$inLvm = false;          // disk is a PV at all
+$pvInVg = false;         // PV already belongs to a volume group
 $isMdDevice = false;
 if ($selected) {
     if (strpos($selected, '/dev/md') === 0) {
@@ -95,11 +96,15 @@ if ($selected) {
             break;
         }
     }
-    // check if this disk is already an LVM PV
-    $pvLines = run_cmd('sudo pvs --noheadings -o pv_name');
+    // check if this disk is already an LVM PV and whether it has a VG
+    $pvLines = run_cmd('sudo pvs --noheadings -o pv_name,vg_name --separator="|"');
     foreach ($pvLines as $pl) {
-        if (trim($pl) === $selected) {
+        $parts = explode('|', trim($pl));
+        if (count($parts) >= 1 && trim($parts[0]) === $selected) {
             $inLvm = true;
+            if (isset($parts[1]) && trim($parts[1]) !== '') {
+                $pvInVg = true;
+            }
             break;
         }
     }
@@ -569,6 +574,12 @@ if ($selected) {
             <button id="btnOpenDelete" class="btn btn-danger ms-2" data-disk="<?php echo htmlspecialchars($selected); ?>">Delete Partition</button>
             <button id="btnOpenFormat" class="btn btn-secondary ms-2" data-disk="<?php echo htmlspecialchars($selected); ?>">Format Partition</button>
             <?php endif; ?>
+            <form method="post" class="d-inline ms-2">
+                <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
+                <button id="btnWipe" name="wipe_disk" class="btn btn-warning">Wipe disk</button>
+            </form>
+        <?php elseif ($inLvm && !$pvInVg): ?>
+            <!-- allow wipe on PVs that aren’t in any VG -->
             <form method="post" class="d-inline ms-2">
                 <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
                 <button id="btnWipe" name="wipe_disk" class="btn btn-warning">Wipe disk</button>

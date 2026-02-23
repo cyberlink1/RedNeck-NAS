@@ -2,25 +2,53 @@
 // Mounts management view. dashboard.php already handled authentication.
 
 $message = '';
+
+// helper to run a command in the host mount namespace if nsenter is installed
+$nsenterAvailable = file_exists('/usr/bin/nsenter');
+function nsCmd($cmd) {
+    global $nsenterAvailable;
+    if ($nsenterAvailable) {
+        return "sudo /usr/bin/nsenter -t 1 -m $cmd";
+    }
+    return $cmd;
+}
+
 // handle mount/unmount
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['mount_lv'])) {
-        $lv = escapeshellarg($_POST['lv_select_mount']);
+        $dev = escapeshellarg($_POST['device_select_mount']);
         $mp = '/export/' . trim($_POST['mount_point']);
         $mpEsc = escapeshellarg($mp);
-        $out = run_cmd("sudo /bin/mkdir -p $mpEsc");
-        // use nsenter to run the mount in the host's mount namespace if
-        // nsenter is available (necessary when Apache runs in a private
-        // namespace).  The command will fail if nsenter isn't installed or
-        // permitted; fallback to regular mount then.
-        if (file_exists('/usr/bin/nsenter')) {
-            $cmd = "sudo /usr/bin/nsenter -t 1 -m /bin/mount -v $lv $mpEsc";
-        } else {
-            $cmd = "sudo /bin/mount -v $lv $mpEsc";
+
+        // collect options if any
+        $opts = [];
+        if (!empty($_POST['mount_opts']) && is_array($_POST['mount_opts'])) {
+            foreach ($_POST['mount_opts'] as $o) {
+                $o = trim($o);
+                if ($o !== '') {
+                    $opts[] = $o;
+                }
+            }
         }
+        $optString = '';
+        if (!empty($opts)) {
+            $optString = implode(',', $opts);
+        }
+
+        $out = run_cmd("sudo /bin/mkdir -p $mpEsc");
+        // mount using nsenter if available (see comment above)
+        if ($nsenterAvailable) {
+            $cmd = "sudo /usr/bin/nsenter -t 1 -m /bin/mount -v";
+        } else {
+            $cmd = "sudo /bin/mount -v";
+        }
+        if ($optString !== '') {
+            $cmd .= " -o " . escapeshellarg($optString);
+        }
+        $cmd .= " $dev $mpEsc";
         $mountOut = run_cmd($cmd);
         // check mount table separately to see if the point actually shows up
-        $grepOut = run_cmd("mount | grep " . escapeshellarg($mp));
+        $grepOut = run_cmd(nsCmd("mount | grep " . escapeshellarg($mp)));
         $grepOut = array_values(array_filter($grepOut, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
         // determine status
         if (preg_grep('/\(exit\s+[1-9]/', $mountOut)) {
@@ -39,6 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // already filtered on the point and the command we executed only
                 // mounted the selected LV.
                 $statusMsg = 'Mount succeeded';
+                // rename variable for clarity
+                $lv = $dev; // keep old references in remaining code
                 // (optionally check visibility; no need to mention it in the message)
                 $dfout = run_cmd("df " . escapeshellarg($mp));
                 if (!preg_grep('/' . preg_quote(trim($lv, "'\""), '/') . '/', $dfout)) {
@@ -49,6 +79,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         if (strpos($statusMsg,'Mount succeeded') === 0) {
+            // optionally add to fstab if user requested
+            if (!empty($_POST['mount_boot'])) {
+                // attempt to detect filesystem type
+                $fstype = '';
+                $blkout = run_cmd("sudo blkid -o value -s TYPE " . escapeshellarg(trim($dev, "'\"")));
+                if (!empty($blkout)) {
+                    $fstype = trim($blkout[0]);
+                }
+                if ($fstype === '') {
+                    $fstype = 'auto';
+                }
+                $entryOpts = $optString !== '' ? $optString : 'defaults';
+                // remove any surrounding quotes from the device path before writing to fstab
+                $devPath = trim($dev, "'\"");
+                $entry = "$devPath $mp $fstype $entryOpts 0 0";
+                // append via sudo so webserver user can write
+                $eEsc = escapeshellarg($entry);
+                // use tee (already allowed in sudoers) to append the line without needing
+                // a shell redirection. we redirect tee output to /dev/null to keep run_cmd
+                // output clean.
+                // add -n so sudo fails rather than hanging on a password prompt
+                $teeOut = run_cmd("echo $eEsc | sudo -n tee -a /etc/fstab >/dev/null");
+                if (preg_grep('/\(exit\s+[1-9]/', $teeOut)) {
+                    $statusMsg .= ' (fstab update failed: ' . htmlspecialchars(implode(' | ', $teeOut)) . ')';
+                } else {
+                    $statusMsg .= ' (added to /etc/fstab)';
+                }
+            }
             // on success we display only the status message
             $message = $statusMsg;
         } else {
@@ -56,7 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif (isset($_POST['umount_lv'])) {
         $mp = escapeshellarg($_POST['umount_select']);
-        if (file_exists('/usr/bin/nsenter')) {
+        if ($nsenterAvailable) {
             $cmd = "sudo /usr/bin/nsenter -t 1 -m /bin/umount $mp";
         } else {
             $cmd = "sudo /bin/umount $mp";
@@ -64,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $out = run_cmd($cmd);
         // check mount table afterward to see if it really disappeared; strip
         // out the sole "(exit N)" line that grep prints when there’s no match.
-        $after = run_cmd("mount | grep " . escapeshellarg($mp));
+        $after = run_cmd(nsCmd("mount | grep " . escapeshellarg($mp)));
         $after = array_values(array_filter($after, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
         // if the entry vanished, treat it as success regardless of command exit code
         if (count($after) === 0) {
@@ -86,73 +144,329 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = implode("<br>", $out);
         }
     }
+    elseif (isset($_POST['edit_mount'])) {
+        // modify existing mount options and adjust /etc/fstab
+        $dev = escapeshellarg($_POST['device']);
+        $mp  = '/export/' . trim($_POST['mount_point']);
+        $mpEsc = escapeshellarg($mp);
+
+        // collect requested options
+        $opts = [];
+        if (!empty($_POST['mount_opts']) && is_array($_POST['mount_opts'])) {
+            foreach ($_POST['mount_opts'] as $o) {
+                $o = trim($o);
+                if ($o !== '') {
+                    $opts[] = $o;
+                }
+            }
+        }
+        $optString = $opts ? implode(',', $opts) : '';
+        // build a remount options string that explicitly includes the
+        // opposite of any boolean choices so remount can add *and* remove
+        // flags.  omitting an option on remount leaves it unchanged.
+        $remOpts = [];
+        if (in_array('rw', $opts, true)) {
+            $remOpts[] = 'rw';
+        } elseif (in_array('ro', $opts, true)) {
+            $remOpts[] = 'ro';
+        }
+        if (in_array('noexec', $opts, true)) {
+            $remOpts[] = 'noexec';
+        } else {
+            $remOpts[] = 'exec';
+        }
+        if (in_array('nosuid', $opts, true)) {
+            $remOpts[] = 'nosuid';
+        } else {
+            $remOpts[] = 'suid';
+        }
+        if (in_array('nodev', $opts, true)) {
+            $remOpts[] = 'nodev';
+        } else {
+            $remOpts[] = 'dev';
+        }
+        $remOptString = implode(',', $remOpts);
+
+        // instead of unmounting then mounting we can simply remount with
+        // new options.  remount operates on the mount point rather than the
+        // device, so we don't need the $dev variable here except for diagnostics.
+        // ensure the mountpoint directory exists just in case the caller
+        // changed the name (unlikely but harmless).
+        $out = run_cmd("sudo /bin/mkdir -p $mpEsc");
+        $remountOpts = 'remount,' . $remOptString;
+        // build command using nsenter if available
+        if ($nsenterAvailable) {
+            $cmd = "sudo /usr/bin/nsenter -t 1 -m /bin/mount -v -o " . escapeshellarg($remountOpts) . " " . $mpEsc;
+        } else {
+            $cmd = "sudo /bin/mount -v -o " . escapeshellarg($remountOpts) . " " . $mpEsc;
+        }
+        $mountOut = run_cmd($cmd);
+
+        $grepOut = run_cmd(nsCmd("mount | grep " . escapeshellarg($mp)));
+        $grepOut = array_values(array_filter($grepOut, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
+        if (preg_grep('/\(exit\s+[1-9]/', $mountOut)) {
+            $statusMsg = 'Mount failed';
+            $out = array_merge($out, $mountOut, $grepOut);
+            $out[] = "command: $cmd";
+        } elseif (count($grepOut) === 0) {
+            $statusMsg = 'Mount command succeeded but mountpoint not listed';
+            $out = array_merge($out, $mountOut, $grepOut);
+        } else {
+            $statusMsg = 'Mount succeeded';
+            $lv = $dev;
+            $dfout = run_cmd("df " . escapeshellarg($mp));
+            if (!preg_grep('/' . preg_quote(trim($lv, "'\""), '/') . '/', $dfout)) {
+                $out = array_merge($out, $mountOut, $grepOut, $dfout);
+            }
+        }
+
+        // remove any existing fstab entry for this point
+        run_cmd("sudo -n sh -c 'grep -v -E \"^[[:space:]]*\\S+\\s+" . preg_quote($mp, '/') . "\\s\" /etc/fstab > /tmp/fstab.$$ && mv /tmp/fstab.$$ /etc/fstab'");
+        if (!empty($_POST['mount_boot'])) {
+            $fstype = '';
+            $blkout = run_cmd("sudo blkid -o value -s TYPE " . escapeshellarg(trim($dev, "'\"")));
+            if (!empty($blkout)) {
+                $fstype = trim($blkout[0]);
+            }
+            if ($fstype === '') {
+                $fstype = 'auto';
+            }
+            $entryOpts = $optString !== '' ? $optString : 'defaults';
+            $devPath = trim($dev, "'\"");
+            $entry = "$devPath $mp $fstype $entryOpts 0 0";
+            $eEsc = escapeshellarg($entry);
+            $teeOut = run_cmd("echo $eEsc | sudo -n tee -a /etc/fstab >/dev/null");
+            if (preg_grep('/\(exit\s+[1-9]/', $teeOut)) {
+                $statusMsg .= ' (fstab update failed: ' . htmlspecialchars(implode(' | ', $teeOut)) . ')';
+            } else {
+                $statusMsg .= ' (fstab updated)';
+            }
+        }
+
+        if (strpos($statusMsg,'Mount succeeded') === 0) {
+            $message = $statusMsg;
+        } else {
+            $message = implode("<br>", $out);
+        }
+    }
 }
 
-// gather logical volumes for dropdown
+// gather logical volumes (still used for other views)
 $lvs = run_cmd('sudo lvs --noheadings -o lv_path');
 // gather current /export mounts for unmount dropdown
-$mnts = run_cmd("mount | grep ' on /export/'");
+
+// when querying mounts we prefer the host namespace if possible so that
+// the table accurately reflects what the system sees rather than whatever
+// namespace PHP happens to be in.
+$mnts = run_cmd(nsCmd("mount | grep ' on /export/'"));
 // strip the lone "(exit N)" line grep prints when there are no matches
 $mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
+
+// determine candidate devices for the mount modal: any device with a filesystem
+// (as reported by blkid) that is not already mounted, not the OS root device,
+// and not already used as an LVM physical volume.
+$fsDevices = run_cmd('sudo blkid -o device');
+$mounted = run_cmd(nsCmd("mount | awk '{print $1}'"));
+$mountSet = array_map('trim', $mounted);
+
+// compute root device and its parent disk name
+$osRoot = '';
+$rootSrc = run_cmd("findmnt -n -o SOURCE /");
+if (!empty($rootSrc)) {
+    $osRoot = trim($rootSrc[0]);
+    if (preg_match('#^/dev/([a-zA-Z0-9]+)#', $osRoot, $m)) {
+        // strip digits to get whole-disk
+        $osRoot = preg_replace('/\d+$/', '', $m[1]);
+        $osRoot = '/dev/' . $osRoot;
+    } else {
+        // if root is not /dev/ path, leave blank
+        $osRoot = '';
+    }
+}
+
+// gather list of pv paths to avoid
+$pvs = run_cmd('sudo pvs --noheadings -o pv_name');
+$pvSet = array_map('trim', $pvs);
+
+$candidates = [];
+foreach ($fsDevices as $d) {
+    $d = trim($d);
+    if ($d === '') continue;
+    if (in_array($d, $mountSet, true)) continue; // already mounted
+    // exclude OS disk/partition
+    if ($osRoot !== '' && (strpos($d, $osRoot) === 0)) continue;
+    // exclude any PV (either exact or starts-with for LVM naming)
+    $skip = false;
+    foreach ($pvSet as $pv) {
+        if ($pv === '') continue;
+        if ($d === $pv || strpos($d, $pv) === 0) {
+            $skip = true;
+            break;
+        }
+    }
+    if ($skip) continue;
+    $candidates[] = $d;
+}
+
+// load fstab lines so we can mark existing entries
+$fstabLines = [];
+$fstabPath = '/etc/fstab';
+if (file_exists($fstabPath)) {
+    $fstabLines = file($fstabPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+}
+
+// build a structured list for the table view (device, mount point, options, fstab flag)
+$mounts = [];
+foreach ($mnts as $m) {
+    // capture device, point, type and options if present
+    if (preg_match('/^(\S+) on (\/export\/\S+) type (\S+) \(([^)]+)\)/', $m, $mm)) {
+        $pt = $mm[2];
+        $inFstab = false;
+        foreach ($fstabLines as $line) {
+            if (preg_match('/^\s*\S+\s+' . preg_quote($pt, '/') . '\s/', $line)) {
+                $inFstab = true;
+                break;
+            }
+        }
+        $mounts[] = ['dev' => $mm[1], 'pt' => $pt, 'opts' => $mm[4], 'fstab' => $inFstab];
+    } elseif (preg_match('/^(\S+) on (\/export\/\S+)/', $m, $mm)) {
+        $pt = $mm[2];
+        $inFstab = false;
+        foreach ($fstabLines as $line) {
+            if (preg_match('/^\s*\S+\s+' . preg_quote($pt, '/') . '\s/', $line)) {
+                $inFstab = true;
+                break;
+            }
+        }
+        $mounts[] = ['dev' => $mm[1], 'pt' => $pt, 'opts' => '', 'fstab' => $inFstab];
+    }
+}
 ?>
 
 <?php if ($message): ?>
     <div id="initialMessage" class="d-none"><?php echo $message; ?></div>
 <?php endif; ?>
 
-<div class="row">
-    <div class="col-md-6">
-        <div class="card mb-3">
-            <div class="card-header">Mount Logical Volume</div>
-            <div class="card-body">
-                <form method="post">
-                    <div class="mb-3">
-                        <label class="form-label">Logical Volume</label>
-                        <select name="lv_select_mount" class="form-select" required>
-                            <option value="">-- choose --</option>
-                            <?php foreach ($lvs as $line):
-                                $lvpath = trim($line);
-                                if ($lvpath === '') continue;
-                                $display = basename($lvpath);
-                                if ($display === 'thin') continue; // hide the underlying thin pool
-                            ?>
-                            <option value="<?php echo htmlspecialchars($lvpath); ?>"><?php echo htmlspecialchars($display); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Mount point (subdir under /export)</label>
-                        <input name="mount_point" class="form-control" placeholder="myshare" required>
-                    </div>
-                    <button id="btnMount" name="mount_lv" class="btn btn-primary" type="submit">Mount</button>
-                </form>
-            </div>
-        </div>
+<div class="row mb-3 align-items-center">
+    <div class="col">
+        <h5>Existing /export mounts</h5>
     </div>
-    <div class="col-md-6">
-        <div class="card mb-3">
-            <div class="card-header">Unmount <code>/export/</code> mount</div>
-            <div class="card-body">
-                <form method="post">
-                    <div class="mb-3">
-                        <label class="form-label">Select mount</label>
-                        <select name="umount_select" class="form-select">
-                            <option value="">-- none --</option>
-                            <?php foreach ($mnts as $m):
-                                if (preg_match('/ on (\/export\/\S+)/', $m, $mm)) {
-                                    $pt = $mm[1];
-                            ?>
-                            <option value="<?php echo htmlspecialchars($pt); ?>"><?php echo htmlspecialchars($pt); ?></option>
-                            <?php
-                                }
-                            endforeach; ?>
-                        </select>
-                    </div>
-                    <button id="btnUmount" name="umount_lv" class="btn btn-secondary" type="submit">Unmount</button>
-                </form>
-            </div>
-        </div>
+    <div class="col text-end">
+        <button id="btnShowMountModal" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createMountModal">Create mount</button>
     </div>
+</div>
+
+<?php if (count($mounts) > 0): ?>
+    <table class="table table-sm table-hover" id="mountTable">
+        <thead>
+            <tr>
+                <th>Device</th>
+                <th>Mount point</th>
+                <th>Options</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($mounts as $m): ?>
+            <tr data-dev="<?php echo htmlspecialchars($m['dev']); ?>" data-pt="<?php echo htmlspecialchars($m['pt']); ?>" data-opts="<?php echo htmlspecialchars($m['opts'] ?? ''); ?>" data-infstab="<?php echo $m['fstab'] ? '1' : '0'; ?>">
+                <td><?php echo htmlspecialchars($m['dev']); ?></td>
+                <td><?php echo htmlspecialchars($m['pt']); ?></td>
+                <td><?php echo htmlspecialchars($m['opts'] ?? ''); ?></td>
+                <td>
+                    <form method="post" class="d-inline">
+                        <input type="hidden" name="umount_select" value="<?php echo htmlspecialchars($m['pt']); ?>">
+                        <button name="umount_lv" class="btn btn-sm btn-secondary btn-umount-row" type="submit">Unmount</button>
+                    </form>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+<?php else: ?>
+    <p>No mounts defined.</p>
+<?php endif; ?>
+
+<!-- mount creation modal -->
+<div class="modal fade" id="createMountModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Mount Device</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="mountForm" method="post">
+            <div class="mb-3">
+                <label class="form-label">Device</label>
+                <select name="device_select_mount" class="form-select" required>
+                    <option value="">-- choose --</option>
+                    <?php foreach ($candidates as $dev):
+                        if (trim($dev) === '') continue;
+                    ?>
+                    <option value="<?php echo htmlspecialchars($dev); ?>"><?php echo htmlspecialchars($dev); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Mount point (subdir under /export)</label>
+                <input name="mount_point" class="form-control" placeholder="myshare" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Mount options</label>
+                <?php
+                $optChoices = ['rw' => 'Read/write', 'ro' => 'Read-only', 'noexec' => 'No exec', 'nosuid' => 'No suid', 'nodev' => 'No dev'];
+                foreach ($optChoices as $opt => $label): ?>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" name="mount_opts[]" value="<?php echo htmlspecialchars($opt); ?>" id="opt_<?php echo htmlspecialchars($opt); ?>">
+                        <label class="form-check-label" for="opt_<?php echo htmlspecialchars($opt); ?>"><?php echo htmlspecialchars($label); ?></label>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+            <div class="mb-3 form-check">
+                <input type="checkbox" class="form-check-input" name="mount_boot" id="mountBoot">
+                <label class="form-check-label" for="mountBoot">Mount at boot (add to /etc/fstab)</label>
+            </div>
+            <button id="btnMount" name="mount_lv" class="btn btn-primary" type="submit">Mount</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- edit mount modal (triggered by clicking a table row) -->
+<div class="modal fade" id="editMountModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="editMountModalTitle">Edit mount</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="editMountForm" method="post">
+            <input type="hidden" name="device">
+            <div class="mb-3">
+                <label class="form-label">Mount point</label>
+                <input name="mount_point" id="editMountPoint" class="form-control" readonly>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Mount options</label>
+                <?php
+                foreach ($optChoices as $opt => $label): ?>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" name="mount_opts[]" value="<?php echo htmlspecialchars($opt); ?>" id="edit_opt_<?php echo htmlspecialchars($opt); ?>">
+                        <label class="form-check-label" for="edit_opt_<?php echo htmlspecialchars($opt); ?>"><?php echo htmlspecialchars($label); ?></label>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+            <div class="mb-3 form-check">
+                <input type="checkbox" class="form-check-input" name="mount_boot" id="editMountBoot">
+                <label class="form-check-label" for="editMountBoot">Mount at boot (add to /etc/fstab)</label>
+            </div>
+            <button id="btnEditMount" name="edit_mount" class="btn btn-primary" type="submit">Save</button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- global confirmation modal used by JS -->
