@@ -661,8 +661,8 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
             </div>
             <div class="modal-body"></div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary btn-cancel" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary btn-ok">OK</button>
+                <button type="button" class="btn btn-secondary btn-cancel ms-2" data-bs-dismiss="modal">Cancel</button>
             </div>
         </div>
     </div>

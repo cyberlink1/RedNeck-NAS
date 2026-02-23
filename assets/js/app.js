@@ -1273,12 +1273,18 @@ function showConfirmation(text, onOk, onCancel) {
             // been submitted)
             if (bs) bs.hide();
         };
-        if (onCancel) {
-            cancelBtn.style.display = '';
-            cancelBtn.onclick = function() { onCancel(); var bs = bootstrap.Modal.getInstance(modal); bs.hide(); };
-        } else {
-            cancelBtn.style.display = 'none';
-        }
+        // always show cancel button; if no handler is supplied it simply
+        // closes the dialog.  previously the button was hidden when the
+        // caller passed only two arguments (message + onOk), which meant
+        // confirmations on the mounts page had no obvious way to abort.
+        cancelBtn.style.display = '';
+        cancelBtn.onclick = function() {
+            if (onCancel) {
+                try { onCancel(); } catch (e) { console.error('error in onCancel callback', e); }
+            }
+            var bs = bootstrap.Modal.getInstance(modal);
+            if (bs) bs.hide();
+        };
         var bsModal = new bootstrap.Modal(modal);
         // show after a tiny delay so any existing backdrop from a just-closed
         // modal has been removed; this prevents the new dialog from ending up
