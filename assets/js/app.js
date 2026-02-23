@@ -1,11 +1,63 @@
 // General JS helpers
 console.log('App script loaded');
 
+// cache of filesystem types read from the initial page; used as a fallback
+// if a modal loses its options after an AJAX refresh of the info modal.
+var cachedFsTypes = [];
+document.addEventListener('DOMContentLoaded', function() {
+    var fsel = document.querySelector('select[name="fstype"]');
+    if (fsel) {
+        cachedFsTypes = [].slice.call(fsel.options)
+            .map(function(o){ return o.value; })
+            .filter(function(v){ return v; });
+        console.log('cached filesystem types', cachedFsTypes);
+    }
+
+    var addForm = document.getElementById('addRaidForm');
+    if (addForm) {
+        addForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var isSpare = addForm.closest('.modal')?.dataset?.spare === '1';
+            var msg = isSpare ? 'Add selected disk as spare?' : 'Add selected disk to RAID?  This will start a rebuild.';
+            showConfirmation(msg, function() {
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = isSpare ? 'add_spare' : 'add_member';
+                inp.value = '1';
+                addForm.appendChild(inp);
+                addForm.submit();
+            });
+        });
+    }
+    var failForm = document.getElementById('failRaidForm');
+    if (failForm) {
+        failForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Mark the selected member as failed and remove it?', function() {
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = 'fail_member';
+                inp.value = '1';
+                failForm.appendChild(inp);
+                failForm.submit();
+            });
+        });
+    }
+});
+
 // helper used by both the modal submit interceptor and the
 // confirmation callbacks; posts the form by AJAX and refreshes the info
 // modal contents with whatever HTML the server returns.
+// we also ensure the disk field is sent and provide a warning if the
+// response is empty (a missing disk value is the usual culprit).
 function submitDiskFormAjax(form) {
+    console.log('submitDiskFormAjax invoked, form=', form, 'lastSubmitName=', form._lastSubmitName);
     var data = new FormData(form);
+    // ensure disk field is always sent (some browsers drop empty hidden inputs)
+    var diskInput = form.querySelector('input[name="disk"]');
+    if (diskInput && diskInput.value) {
+        data.set('disk', diskInput.value);
+    }
     if (form._lastSubmitName) {
         data.append(form._lastSubmitName, form._lastSubmitValue);
     }
@@ -13,11 +65,126 @@ function submitDiskFormAjax(form) {
     fetch('views/disks.php', { method: 'POST', body: data })
         .then(function(resp) { return resp.text(); })
         .then(function(newHtml) {
+            if (newHtml.trim() === '') {
+                // nothing returned – most likely the disk value was missing
+                showResult('Error: no response from server (disk may be unset)');
+                return;
+            }
+            // hide any submodal that might still be open
+            ['createPartModal','deletePartModal','formatPartModal'].forEach(function(id) {
+                var m = document.getElementById(id);
+                var inst = bootstrap.Modal.getInstance(m);
+                if (inst && m.classList.contains('show')) inst.hide();
+            });
+
+            // parse the returned HTML so we can inspect/strip special markers
+            var temp = document.createElement('div');
+            temp.innerHTML = newHtml;
+            var genericMsg = null;
+            // capture any bootstrap info alert text
+            var alertElt = temp.querySelector('.alert.alert-info');
+            if (alertElt) {
+                genericMsg = alertElt.textContent.trim();
+                alertElt.remove();
+            }
+            var res = temp.querySelector('#formatResult');
+            var fmtOk, fmtMsg;
+            if (res) {
+                fmtOk = res.dataset.ok === '1';
+                fmtMsg = res.dataset.msg || (fmtOk ? 'Format completed.' : 'Format failed.');
+                res.remove();
+            }
+            newHtml = temp.innerHTML;
+
+            // update the preview first
             showInfo(newHtml);
+
+            // then, if we had any result message, show it in the result modal
+            if (typeof fmtOk !== 'undefined' || genericMsg) {
+                var infoModal = document.getElementById('infoModal');
+                var doShow = function() { showResult(genericMsg || fmtMsg); };
+                if (infoModal && infoModal.classList.contains('show')) {
+                    doShow();
+                } else if (infoModal) {
+                    var handler = function() {
+                        infoModal.removeEventListener('shown.bs.modal', handler);
+                        doShow();
+                    };
+                    infoModal.addEventListener('shown.bs.modal', handler);
+                } else {
+                    doShow();
+                }
+            }
         })
         .catch(function(err) {
             console.error('modal form ajax error', err);
         });
+}
+
+function openAddRaidModal(raidDev, isSpare) {
+    var modal = document.getElementById('addRaidModal');
+    if (!modal) return;
+    modal.dataset.spare = isSpare ? '1' : '0';
+    // hide any underlying info/details modal so our dialog is on top
+    var infoModal = document.getElementById('infoModal');
+    if (infoModal) {
+        var inst = bootstrap.Modal.getInstance(infoModal);
+        if (inst && infoModal.classList.contains('show')) inst.hide();
+    }
+    var select = modal.querySelector('select[name="new_disk"]');
+    select.innerHTML = '<option value="">(loading…)</option>';
+    fetch('views/raid.php?json_unused=1')
+        .then(function(r){ return r.json(); })
+        .then(function(list){
+            select.innerHTML = '';
+            if (!Array.isArray(list) || list.length === 0) {
+                select.innerHTML = '<option value="">(no disks)</option>';
+            } else {
+                list.forEach(function(d){
+                    var o = document.createElement('option');
+                    o.value = d; o.textContent = d;
+                    select.appendChild(o);
+                });
+            }
+        })
+        .catch(function(err){
+            console.error('list unused disks error', err);
+            select.innerHTML = '<option value="">error</option>';
+        });
+    modal.querySelector('input[name="raid_select"]').value = raidDev;
+    new bootstrap.Modal(modal).show();
+}
+
+function openFailRaidModal(raidDev) {
+    var modal = document.getElementById('failRaidModal');
+    if (!modal) return;
+    var infoModal = document.getElementById('infoModal');
+    if (infoModal) {
+        var inst = bootstrap.Modal.getInstance(infoModal);
+        if (inst && infoModal.classList.contains('show')) inst.hide();
+    }
+    var select = modal.querySelector('select[name="member"]');
+    select.innerHTML = '<option value="">(loading…)</option>';
+    fetch('views/raid.php?json_members=1&raid=' + encodeURIComponent(raidDev))
+        .then(function(r){ return r.json(); })
+        .then(function(list){
+            select.innerHTML = '';
+            if (!Array.isArray(list) || list.length === 0) {
+                select.innerHTML = '<option value="">(no members)</option>';
+            } else {
+                list.forEach(function(m){
+                    var o = document.createElement('option');
+                    o.value = m; o.textContent = m;
+                    select.appendChild(o);
+                });
+            }
+        })
+        .catch(function(err){
+            console.error('list members error', err);
+            select.innerHTML = '<option value="">error</option>';
+        });
+    modal.querySelector('input[name="raid_select"]').value = raidDev;
+    new bootstrap.Modal(modal).show();
 }
 
 function attachDiskHandlers(root) {
@@ -73,6 +240,65 @@ function attachDiskHandlers(root) {
             });
         });
     }
+
+    // RAID-specific action buttons inside a raid info modal
+    var raidActions = root.querySelectorAll('#btnPartitionRaid, #btnFormatRaid, #btnAddRaid, #btnAddSpareRaid, #btnFailRaid, #btnRebuildRaid, #btnRemoveRaid');
+    raidActions.forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            var action = btn.id.replace('btn','').toLowerCase();
+            var raidDev = btn.dataset.raid;
+            console.log('raid action click', action, raidDev);
+            if (action === 'partitionraid') {
+                // immediately switch to disk view without extra confirmation
+                fetch('views/disks.php?ajax=1&raid=1&disk=' + encodeURIComponent(raidDev))
+                    .then(function(resp){ return resp.text(); })
+                    .then(function(html){ showInfo(html); })
+                    .catch(function(err){ console.error('raid->disk AJAX error', err); });
+            } else if (action === 'addraid' || action === 'addspareraid') {
+                openAddRaidModal(raidDev, action === 'addspareraid');
+            } else if (action === 'failraid') {
+                openFailRaidModal(raidDev);
+            } else {
+                var msgText;
+                switch(action) {
+                    case 'formatraid':
+                        msgText = 'Format the RAID device ' + raidDev + '? All data will be lost.';
+                        break;
+                    case 'rebuildraid':
+                        msgText = 'Initiate rebuild for ' + raidDev + '?';
+                        break;
+                    case 'removeraid':
+                        msgText = 'Stop and remove the RAID array ' + raidDev + '? Data will be lost.';
+                        break;
+                    default:
+                        msgText = 'Proceed with action?';
+                }
+                showConfirmation(msgText, function() {
+                    var f = document.createElement('form');
+                    f.method = 'post';
+                    f.style.display = 'none';
+                    var inp = document.createElement('input');
+                    inp.type = 'hidden';
+                    inp.name = 'raid_select';
+                    inp.value = raidDev;
+                    f.appendChild(inp);
+                    var act = document.createElement('input');
+                    act.type = 'hidden';
+                    // PHP expects underscore names for some actions
+                    var phpName = action;
+                    if (action === 'removeraid') phpName = 'remove_raid';
+                    if (action === 'formatraid') phpName = 'format_raid';
+                    if (action === 'rebuildraid') phpName = 'rebuild_raid';
+                    act.name = phpName;
+                    act.value = '1';
+                    f.appendChild(act);
+                    document.body.appendChild(f);
+                    f.submit();
+                });
+            }
+        });
+    });
 }
 
 function showInfo(html) {
@@ -90,6 +316,19 @@ function showInfo(html) {
     if (btn2) btn2.addEventListener('click', function() { openSubmodal('deletePartModal', btn2.dataset.disk); });
     var btnFmt = body.querySelector('#btnOpenFormat');
     if (btnFmt) btnFmt.addEventListener('click', function() { openSubmodal('formatPartModal', btnFmt.dataset.disk); });
+    // raid-member links for partitioning underlying disks
+    body.querySelectorAll('a.raid-member').forEach(function(link) {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            var dev = link.dataset.dev || '';
+            if (dev) {
+                fetch('views/disks.php?ajax=1&raid=1&disk=' + encodeURIComponent(dev))
+                    .then(function(resp){ return resp.text(); })
+                    .then(function(html){ showInfo(html); })
+                    .catch(function(err){ console.error('member AJAX error', err); });
+            }
+        });
+    });
 
     // move any action buttons/forms into the modal footer so they're aligned
     // with the Close button
@@ -147,8 +386,36 @@ function openSubmodal(subId, disk) {
         // populate disk field
         var hid = sub.querySelector('input[name=disk]');
         if (hid) hid.value = disk;
+        // if this is an md device being edited from RAID view, make sure the
+        // hidden raid flag is present so subsequent refreshes don't disable
+        // the buttons.
+        if (disk.startsWith('/dev/md')) {
+            var raidInp = sub.querySelector('input[name=raid]');
+            if (!raidInp) {
+                raidInp = document.createElement('input');
+                raidInp.type = 'hidden';
+                raidInp.name = 'raid';
+                raidInp.value = '1';
+                // put inside first form if present
+                var form = sub.querySelector('form');
+                if (form) form.appendChild(raidInp);
+                else sub.appendChild(raidInp);
+            } else {
+                raidInp.value = '1';
+            }
+        }
         // clear other inputs (size/partnum) to avoid leftover values
         sub.querySelectorAll('input[name="size"], select[name="part_num"]').forEach(function(i){ i.value = ''; });
+        // warn when opening the partition creation dialog on an md device
+        if (subId === 'createPartModal' && disk.startsWith('/dev/md')) {
+            if (!sub.querySelector('.raid-note')) {
+                var note = document.createElement('div');
+                note.className = 'alert alert-warning raid-note';
+                note.textContent = 'RAID devices often report "unrecognised disk label" and may not display partitions here; the UI will show a success/error message and may fall back to sgdisk if parted fails.';
+                var body = sub.querySelector('.modal-body');
+                if (body) body.insertBefore(note, body.firstChild);
+            }
+        }
         // if this is delete or format modal, populate the partition dropdown
         if (subId === 'deletePartModal' || subId === 'formatPartModal') {
             var sel = sub.querySelector('select[name="part_num"]');
@@ -179,6 +446,16 @@ function openSubmodal(subId, disk) {
         if (subId === 'formatPartModal') {
             var fsel = sub.querySelector('select[name="fstype"]');
             if (fsel) {
+                // if the select lost its options (possible after a reload) use the
+                // cached list we gathered on page load
+                if (fsel.options.length <= 1 && cachedFsTypes.length) {
+                    fsel.innerHTML = '';
+                    cachedFsTypes.forEach(function(fs) {
+                        var o = document.createElement('option');
+                        o.value = fs; o.textContent = fs;
+                        fsel.appendChild(o);
+                    });
+                }
                 if ([].slice.call(fsel.options).some(o=>o.value==='ext4')) {
                     fsel.value = 'ext4';
                 }
@@ -199,18 +476,37 @@ function openSubmodal(subId, disk) {
             });
             form.addEventListener('submit', function(e) {
                 e.preventDefault();
-                // if this is the format partition form, warn first
-                if (form._lastSubmitName === 'format_part') {
-                    // hide the format/create/delete submodal so the confirmation
-                    // will stack above it (removes its backdrop as well)
-                    ['formatPartModal','createPartModal','deletePartModal'].forEach(function(id){
-                        var m = document.getElementById(id);
-                        if (m) {
-                            var inst = bootstrap.Modal.getInstance(m);
-                            if (inst && m.classList.contains('show')) inst.hide();
-                        }
-                    });
-                    showConfirmation('Format the selected partition? This will destroy all data on it.', function() {
+                // hide any open submodal; the confirmation will appear above all
+                ['formatPartModal','createPartModal','deletePartModal'].forEach(function(id){
+                    var m = document.getElementById(id);
+                    if (m) {
+                        var inst = bootstrap.Modal.getInstance(m);
+                        if (inst && m.classList.contains('show')) inst.hide();
+                    }
+                });
+
+                // figure out which button triggered the submit (modern browsers)
+                var btn = e.submitter || null;
+                var action = btn && btn.name ? btn.name : '';
+                // store for backwards compatibility
+                form._lastSubmitName = action;
+
+                var confirmMsg = null;
+                switch(action) {
+                    case 'format_part':
+                        confirmMsg = 'Format the selected partition? This will destroy all data on it.';
+                        break;
+                    case 'create_part_size':
+                    case 'create_part':
+                        confirmMsg = 'Create this partition? This may overwrite existing data.';
+                        break;
+                    case 'delete_part':
+                        confirmMsg = 'Delete the selected partition? This is destructive.';
+                        break;
+                }
+
+                if (confirmMsg) {
+                    showConfirmation(confirmMsg, function() {
                         submitDiskFormAjax(form);
                     });
                 } else {
@@ -232,85 +528,46 @@ function openSubmodal(subId, disk) {
     }
 }
 
-// helper used by both the modal submit interceptor and the
-// confirmation callbacks; posts the form by AJAX and refreshes the info
-// modal contents with whatever HTML the server returns.
-function submitDiskFormAjax(form) {
-    var data = new FormData(form);
-    if (form._lastSubmitName) {
-        data.append(form._lastSubmitName, form._lastSubmitValue);
-    }
-    data.append('ajax', '1');
-    fetch('views/disks.php', { method: 'POST', body: data })
-        .then(function(resp) { return resp.text(); })
-        .then(function(newHtml) {
-            // hide any submodal that might still be open
-            ['createPartModal','deletePartModal','formatPartModal'].forEach(function(id) {
-                var m = document.getElementById(id);
-                var inst = bootstrap.Modal.getInstance(m);
-                if (inst && m.classList.contains('show')) inst.hide();
-            });
-
-            // if the response includes a formatResult marker, extract it
-            var temp = document.createElement('div');
-            temp.innerHTML = newHtml;
-            var res = temp.querySelector('#formatResult');
-            var fmtOk, fmtMsg;
-            if (res) {
-                fmtOk = res.dataset.ok === '1';
-                fmtMsg = res.dataset.msg || (fmtOk ? 'Format completed.' : 'Format failed.');
-                res.remove();
-                newHtml = temp.innerHTML;
-            }
-
-            // update the preview first
-            showInfo(newHtml);
-
-            // then, if we had a format result, show it in a dedicated result
-            // modal (does not hide the info modal).  However we must wait until
-            // the info modal has finished appearing, otherwise it will cover the
-            // result.  Use shown.bs.modal event rather than a blind timeout.
-            if (typeof fmtOk !== 'undefined') {
-                var infoModal = document.getElementById('infoModal');
-                var doShow = function() { showResult(fmtMsg); };
-                if (infoModal && infoModal.classList.contains('show')) {
-                    doShow();
-                } else if (infoModal) {
-                    var handler = function() {
-                        infoModal.removeEventListener('shown.bs.modal', handler);
-                        doShow();
-                    };
-                    infoModal.addEventListener('shown.bs.modal', handler);
-                } else {
-                    doShow();
-                }
-            }
-        })
-        .catch(function(err) {
-            console.error('modal form ajax error', err);
-        });
-}
-
 function showConfirmation(text, onOk, onCancel) {
-    // if info modal is open and currently shown, hide it first and only
-    // display the confirmation once the preview has completely closed.  this
-    // avoids the common problem of the confirm dialog appearing behind the
-    // still‑visible info modal/backdrop when actions are triggered from the
-    // preview window (e.g. wipe/delete buttons).
+    console.log('showConfirmation called with text=', text);
+    // hide any visible info or create‑raid modals before showing the
+    // confirmation so its backdrop is on top.  once *all* requested
+    // modals have finished hiding we call actuallyShowConfirm (or call it
+    // immediately if none were visible).
+    var toHide = [];
     var info = document.getElementById('infoModal');
     if (info) {
         var iModal = bootstrap.Modal.getInstance(info);
         if (iModal && info.classList.contains('show')) {
-            var handler = function() {
-                info.removeEventListener('hidden.bs.modal', handler);
-                actuallyShowConfirm();
-            };
-            info.addEventListener('hidden.bs.modal', handler);
-            iModal.hide();
-            return;
+            toHide.push(info);
         }
     }
-    actuallyShowConfirm();
+    var create = document.getElementById('createRaidModal');
+    if (create) {
+        var cModal = bootstrap.Modal.getInstance(create);
+        if (cModal && create.classList.contains('show')) {
+            toHide.push(create);
+        }
+    }
+    var remaining = toHide.length;
+    var done = function() {
+        remaining--;
+        if (remaining <= 0) {
+            actuallyShowConfirm();
+        }
+    };
+    if (remaining === 0) {
+        actuallyShowConfirm();
+    } else {
+        toHide.forEach(function(m) {
+            m.addEventListener('hidden.bs.modal', function handler() {
+                m.removeEventListener('hidden.bs.modal', handler);
+                done();
+            });
+            var inst = bootstrap.Modal.getInstance(m);
+            if (inst) inst.hide();
+        });
+    }
 
     function actuallyShowConfirm() {
         var modal = document.getElementById('confirmModal');
@@ -437,20 +694,23 @@ window.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
-    var removeRaidBtn = document.getElementById('btnRemoveRaid');
-    if (removeRaidBtn) {
-        removeRaidBtn.addEventListener('click', function(e) {
+    // support any remove button generated per row or the old single button
+    var raidRemoveButtons = document.querySelectorAll('button[name="remove_raid"]');
+    raidRemoveButtons.forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
             e.preventDefault();
             showConfirmation('Stop and remove selected RAID array? Data on array will be lost.', function() {
                 var inp = document.createElement('input');
                 inp.type = 'hidden';
-                inp.name = removeRaidBtn.name;
-                inp.value = removeRaidBtn.value || '';
-                removeRaidBtn.form.appendChild(inp);
-                removeRaidBtn.form.submit();
+                inp.name = btn.name;
+                inp.value = btn.value || '';
+                btn.form.appendChild(inp);
+                btn.form.submit();
             });
         });
-    }
+    });
+
+    // Create RAID button uses data-bs attributes; no additional JS needed here
 
 
     // mount/unmount confirmation on mounts.php
@@ -506,6 +766,22 @@ window.addEventListener('DOMContentLoaded', function() {
                     .catch(function(err) {
                         console.error('AJAX error', err);
                     });
+            });
+        });
+    }
+})();
+
+// raid table row info/selection (similar pattern)
+(function() {
+    var raidTable = document.getElementById('raidTable');
+    if (raidTable) {
+        raidTable.querySelectorAll('tbody tr').forEach(function(row) {
+            row.addEventListener('click', function() {
+                var dev = row.dataset.dev || '';
+                fetch('views/raid.php?ajax=1&raid=' + encodeURIComponent(dev))
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) { showInfo(html); })
+                    .catch(function(err) { console.error('raid AJAX error', err); });
             });
         });
     }

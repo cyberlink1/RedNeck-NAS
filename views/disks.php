@@ -33,6 +33,26 @@ function part_print($dev) {
     return run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' print');
 }
 
+// helper to determine if a device currently lacks a recognisable partition
+// label.  We run `parted print` and look for the messages parted itself
+// emits when a label is missing; this lets us create a GPT label before
+// attempting a mkpart which otherwise would fail on RAID devices.
+function needs_label_init($dev) {
+    $out = run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' print');
+    foreach ($out as $line) {
+        if (stripos($line, 'unrecognised disk label') !== false ||
+            stripos($line, 'Partition Table: unknown') !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// create a GPT label on the given device; return the command output lines
+function init_label($dev) {
+    return run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' mklabel gpt');
+}
+
 $message = '';
 // filesystem types we can format with; determine by scanning the mkfs
 // binaries present under /sbin and /usr/sbin.  We normalize names and
@@ -94,26 +114,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($dev === '' || $start === '' || $end === '') {
             $message = 'Please select a disk and specify start/end for new partition.';
         } else {
-            $cmd = 'sudo parted -s ' . escapeshellarg($dev) .
-                   ' mkpart ' . escapeshellarg($type) .
-                   ' ' . escapeshellarg($start) .
-                   ' ' . escapeshellarg($end);
-            $out = run_cmd($cmd);
-            // drop initial unrecognised-label error if we will create a label
-            $labelError = false;
-            foreach ($out as $i => $line) {
-                if (stripos($line, 'unrecognised disk label') !== false) {
-                    $labelError = true;
-                    unset($out[$i]);
+            // if the device currently has no label, create one first so
+            // mkpart doesn't immediately fail with "unrecognised disk label".
+            $preOut = [];
+            if (needs_label_init($dev)) {
+                $preOut[] = '(initialising GPT label)';
+                $preOut = array_merge($preOut, init_label($dev));
+            }
+
+            $isMd = strpos($dev, '/dev/md') === 0;
+            $out = [];
+
+            if (!$isMd) {
+                $cmd = 'sudo parted -s ' . escapeshellarg($dev) .
+                       ' mkpart ' . escapeshellarg($type) .
+                       ' ' . escapeshellarg($start) .
+                       ' ' . escapeshellarg($end);
+                $out = run_cmd($cmd);
+
+                // fallback: if mkpart still complained about label, try again
+                $labelError = false;
+                foreach ($out as $i => $line) {
+                    if (stripos($line, 'unrecognised disk label') !== false) {
+                        $labelError = true;
+                        unset($out[$i]);
+                    }
+                }
+                if ($labelError) {
+                    $out[] = '(initialising GPT label)';
+                    $out = array_merge($out,
+                           init_label($dev));
+                    $out = array_merge($out, run_cmd($cmd));
                 }
             }
-            if ($labelError) {
-                $out[] = '(initialising GPT label)';
-                $out = array_merge($out,
-                       run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' mklabel gpt'));
-                $out = array_merge($out, run_cmd($cmd));
+
+            // if using md device or parted failed with nonzero exit, try sgdisk
+            $failure = $isMd;
+            foreach ($out as $line) {
+                if (preg_match('/\(exit \d+\)/', $line)) {
+                    $failure = true;
+                    break;
+                }
             }
-            $message = implode("<br>", $out);
+            if ($failure && $isMd) {
+                // try writing with sgdisk instead
+                $out = ['(fallback to sgdisk)'];
+                // ensure label
+                if (needs_label_init($dev)) {
+                    $out = array_merge($out, ['(initialising GPT label)'], init_label($dev));
+                }
+                // compute MiB values and convert to sectors for sgdisk
+                $startMiB = convert_to_mib($start);
+                $endMiB = convert_to_mib($end);
+                if ($startMiB === null || $endMiB === null) {
+                    $out[] = 'could not interpret start/end for sgdisk fallback';
+                } else {
+                    $toSec = function($mib){ return intval(round($mib * 2048)); };
+                    $startSec = $toSec($startMiB);
+                    $endSec = $toSec($endMiB) - 1;
+                    $out = array_merge($out, run_cmd('sudo sgdisk -n 0:' . escapeshellarg($startSec) . ':' . escapeshellarg($endSec) . ' ' . escapeshellarg($dev)));
+                }
+            }
+
+            // assemble final message; include pre-label output if any
+            $full = $preOut;
+            if (!empty($out)) {
+                $full = array_merge($full, $out);
+            }
+            if (empty($full)) {
+                $message = 'Partition created successfully.';
+            } else {
+                $message = implode("<br>", $full);
+            }
         }
         $selected = $dev;
     } elseif (isset($_POST['create_part_size'])) {
@@ -128,68 +200,113 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'Disk already has maximum (4) partitions.';
             } else {
                 // treat the supplied size as the end point; compute a sensible
-            // start.  On an empty disk this is 1MiB; for subsequent partitions
-            // use the end of the last partition + 1MiB.  unit mib makes parted
-            // output predictable for parsing.
-            $start = '1MiB';
-            if ($current > 0) {
-                $lastEnd = 1; // in MiB
-                $print = run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' unit mib print');
-                foreach ($print as $line) {
-                    if (preg_match('/^\s*\d+\s+([0-9]+\.?[0-9]*)MiB\s+([0-9]+\.?[0-9]*)MiB/', $line, $m)) {
-                        $endVal = floatval($m[2]);
-                        if ($endVal > $lastEnd) {
-                            $lastEnd = $endVal;
+                // start.  On an empty disk this is 1MiB; for subsequent partitions
+                // use the end of the last partition + 1MiB.  unit mib makes parted
+                // output predictable for parsing.
+                $start = '1MiB';
+                if ($current > 0) {
+                    $lastEnd = 1; // in MiB
+                    $print = run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' unit mib print');
+                    foreach ($print as $line) {
+                        if (preg_match('/^\s*\d+\s+([0-9]+\.?[0-9]*)MiB\s+([0-9]+\.?[0-9]*)MiB/', $line, $m)) {
+                            $endVal = floatval($m[2]);
+                            if ($endVal > $lastEnd) {
+                                $lastEnd = $endVal;
+                            }
                         }
                     }
+                    // start one MiB after last end
+                    $start = ($lastEnd + 1) . 'MiB';
                 }
-                // start one MiB after last end
-                $start = ($lastEnd + 1) . 'MiB';
-            }
-            // validate that requested size is larger than start
-            $startMiB = 0;
-            if (preg_match('/([0-9]+\.?[0-9]*)MiB/', $start, $sm)) {
-                $startMiB = floatval($sm[1]);
-            }
-            // compute approximate available space using disk size from lsblk
-            $diskBytes = intval(trim(run_cmd('sudo lsblk -nb -o SIZE ' . escapeshellarg($dev))[0] ?? '0'));
-            $diskMiB = $diskBytes / (1024 * 1024);
-            $availMiB = max(0, $diskMiB - $startMiB);
+                // validate that requested size is larger than start
+                $startMiB = 0;
+                if (preg_match('/([0-9]+\.?[0-9]*)MiB/', $start, $sm)) {
+                    $startMiB = floatval($sm[1]);
+                }
+                // compute approximate available space using disk size from lsblk
+                $diskBytes = intval(trim(run_cmd('sudo lsblk -nb -o SIZE ' . escapeshellarg($dev))[0] ?? '0'));
+                $diskMiB = $diskBytes / (1024 * 1024);
+                $availMiB = max(0, $diskMiB - $startMiB);
 
-            $sizeMiB = convert_to_mib($size);
-            if ($sizeMiB !== null && $sizeMiB <= 0) {
-                $message = 'Specified size must be greater than zero.';
-            } elseif ($sizeMiB !== null && $sizeMiB > $availMiB) {
-                $message = 'Requested size ('.$size.') exceeds available space (approx '.round($availMiB,1).' MiB).';
-            } else {
-                // if we understood the size, compute an explicit end value to
-                // avoid rounding/interpretation discrepancies with parted
-                if ($sizeMiB !== null) {
-                    $endMiB = $startMiB + $sizeMiB;
-                    // round to three decimals for safety
-                    $end = round($endMiB, 3) . 'MiB';
+                $sizeMiB = convert_to_mib($size);
+                if ($sizeMiB !== null && $sizeMiB <= 0) {
+                    $message = 'Specified size must be greater than zero.';
+                } elseif ($sizeMiB !== null && $sizeMiB > $availMiB) {
+                    $message = 'Requested size ('.$size.') exceeds available space (approx '.round($availMiB,1).' MiB).';
                 } else {
-                    $end = $size;
-                }
-                $cmd = 'sudo parted -s ' . escapeshellarg($dev) .
-                       ' mkpart primary ' . escapeshellarg($start) . ' ' . escapeshellarg($end);
-                $out = run_cmd($cmd);
-                // same label initialization logic as above
-                $labelError = false;
-                foreach ($out as $i => $line) {
-                    if (stripos($line, 'unrecognised disk label') !== false) {
-                        $labelError = true;
-                        unset($out[$i]);
+                    // if we understood the size, compute an explicit end value to
+                    // avoid rounding/interpretation discrepancies with parted
+                    if ($sizeMiB !== null) {
+                        $endMiB = $startMiB + $sizeMiB;
+                        // round to three decimals for safety
+                        $end = round($endMiB, 3) . 'MiB';
+                    } else {
+                        $end = $size;
+                    }
+
+                    // pre‑create label if we detected none
+                    $preOut = [];
+                    if (needs_label_init($dev)) {
+                        $preOut[] = '(initialising GPT label)';
+                        $preOut = array_merge($preOut, init_label($dev));
+                    }
+
+                    $isMd = strpos($dev, '/dev/md') === 0;
+                    $out = [];
+
+                    if (!$isMd) {
+                        $cmd = 'sudo parted -s ' . escapeshellarg($dev) .
+                               ' mkpart primary ' . escapeshellarg($start) . ' ' . escapeshellarg($end);
+                        $out = run_cmd($cmd);
+                        // same label initialization logic as above (fallback)
+                        $labelError = false;
+                        foreach ($out as $i => $line) {
+                            if (stripos($line, 'unrecognised disk label') !== false) {
+                                $labelError = true;
+                                unset($out[$i]);
+                            }
+                        }
+                        if ($labelError) {
+                            $out[] = '(initialising GPT label)';
+                            $out = array_merge($out, init_label($dev));
+                            $out = array_merge($out, run_cmd($cmd));
+                        }
+                    }
+
+                    // if md device or parted returned failure, fallback to sgdisk
+                    $failure = $isMd;
+                    foreach ($out as $line) {
+                        if (preg_match('/\(exit \d+\)/', $line)) {
+                            $failure = true;
+                            break;
+                        }
+                    }
+                    if ($failure && $isMd) {
+                        $out = ['(fallback to sgdisk)'];
+                        if (needs_label_init($dev)) {
+                            $out = array_merge($out, ['(initialising GPT label)'], init_label($dev));
+                        }
+                        if ($sizeMiB !== null) {
+                            $toSec = function($mib){ return intval(round($mib * 2048)); };
+                            $startSec = $toSec($startMiB);
+                            $endSec = $toSec($startMiB + $sizeMiB) - 1;
+                            $out = array_merge($out, run_cmd('sudo sgdisk -n 0:' . escapeshellarg($startSec) . ':' . escapeshellarg($endSec) . ' ' . escapeshellarg($dev)));
+                        } else {
+                            // fall back to size string (less reliable)
+                            $out = array_merge($out, run_cmd('sudo sgdisk -n 0:0:+' . escapeshellarg($size) . ' ' . escapeshellarg($dev)));
+                        }
+                    }
+                    // build final message
+                    $full = $preOut;
+                    if (!empty($out)) {
+                        $full = array_merge($full, $out);
+                    }
+                    if (empty($full)) {
+                        $message = 'Partition created successfully.';
+                    } else {
+                        $message = implode("<br>", $full);
                     }
                 }
-                if ($labelError) {
-                    $out[] = '(initialising GPT label)';
-                    $out = array_merge($out,
-                           run_cmd('sudo parted -s ' . escapeshellarg($dev) . ' mklabel gpt'));
-                    $out = array_merge($out, run_cmd($cmd));
-                }
-                $message = implode("<br>", $out);
-            }
             }
         }
         $selected = $dev;
@@ -407,7 +524,9 @@ function is_cdrom($dev) {
 // generate card HTML for a selected disk (used in page and ajax)
 $cards_html = '';
 if ($selected) {
-    $disabled = disk_in_use($selected, $mdmembers, $pvNames);
+    // when called from RAID modal we may want to allow partitioning of md devices
+    $disableCheck = empty($_REQUEST['raid']);
+    $disabled = $disableCheck ? disk_in_use($selected, $mdmembers, $pvNames) : false;
     $hasParts = has_partitions($selected);
     $partCount = partition_count($selected);
     $isCdrom = is_cdrom($selected);
@@ -426,10 +545,14 @@ if ($selected) {
         $msg = htmlspecialchars($formatResult['msg'], ENT_QUOTES);
         echo "<div id=\"formatResult\" $attr data-msg=\"$msg\"></div>";
     }
+
+    // capture partition print output once so we can reuse it (and possibly
+    // warn about RAID devices where it may always report 'unknown').
+    $pOut = part_print($selected);
     ?>
     <div class="card mb-3">
         <div class="card-header">Partition Table for <?php echo htmlspecialchars($selected); ?></div>
-        <div class="card-body"><pre><?php echo htmlspecialchars(implode("\n", part_print($selected))); ?></pre></div>
+        <div class="card-body"><pre><?php echo htmlspecialchars(implode("\n", $pOut)); ?></pre></div>
     </div>
     <?php if ($disabled): ?>
     <div class="alert alert-warning">
@@ -637,6 +760,10 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
       <div class="modal-body">
         <form>
           <input type="hidden" name="disk" value="">
+          <?php if (!empty(
+	rtrim($_REQUEST['raid'] ?? ''," "))): ?>
+            <input type="hidden" name="raid" value="1">
+          <?php endif; ?>
           <div class="mb-3">
             <label class="form-label">Size (e.g. 1G, 500M, 2T)</label>
             <input name="size" class="form-control" required placeholder="e.g. 10G">
@@ -656,8 +783,10 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
       </div>
       <div class="modal-body">
         <form>
-          <input type="hidden" name="disk" value="">
-          <div class="mb-3">
+          <input type="hidden" name="disk" value="">          <?php if (!empty(
+	rtrim($_REQUEST['raid'] ?? ''," "))): ?>
+            <input type="hidden" name="raid" value="1">
+          <?php endif; ?>          <div class="mb-3">
             <label class="form-label">Partition number</label>
             <select name="part_num" class="form-select" required>
               <option value="">(loading…)</option>
@@ -678,8 +807,10 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
         </div>
         <div class="modal-body">
           <form>
-            <input type="hidden" name="disk" value="">
-            <div class="mb-3">
+            <input type="hidden" name="disk" value="">            <?php if (!empty(
+	rtrim($_REQUEST['raid'] ?? ''," "))): ?>
+                <input type="hidden" name="raid" value="1">
+            <?php endif; ?>            <div class="mb-3">
               <label class="form-label">Partition number</label>
               <select name="part_num" class="form-select" required>
                 <option value="">(loading…)</option>

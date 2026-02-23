@@ -15,11 +15,19 @@ SRC_DIR="$(dirname "$0")"
 
 echo "Deploying from $SRC_DIR to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}..."
 
-# exclude common ignored files
-rsync -avz --delete \
-    --exclude='.git' \
-    --exclude='deploy.sh' \
-    --exclude='README.md' \
+# prepare rsync exclude file (patterns may be customized)
+EXCLUDE_FILE="$SRC_DIR/.rsync.exclude"
+if [[ ! -f "$EXCLUDE_FILE" ]]; then
+    cat <<'EOF' > "$EXCLUDE_FILE"
+*.txt
+*.sh
+*.md
+.git
+EOF
+fi
+
+# sync with deletion of remote files that no longer exist locally
+rsync -avz --delete --exclude-from="$EXCLUDE_FILE" \
     "$SRC_DIR/" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 
 echo "Deployment complete."
