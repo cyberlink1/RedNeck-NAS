@@ -1,5 +1,5 @@
 // General JS helpers
-console.log('App script loaded');
+// App script loaded (debug logs removed)
 
 // spinner handling – overlay is hidden by default, toggled by adding/removing
 // the "show" class (see assets/css/style.css).  In addition we hook the
@@ -1214,7 +1214,7 @@ function openSubmodal(subId, disk) {
 }
 
 function showConfirmation(text, onOk, onCancel) {
-    console.log('showConfirmation called with text=', text);
+    // confirmation dialog called
     // signal that a confirmation is in-flight; handlers should avoid
     // re-opening any parent modals.
     window._confirmActive = true;
@@ -1257,12 +1257,21 @@ function showConfirmation(text, onOk, onCancel) {
         // attach handlers inside modal content if any
         attachDiskHandlers(body);
         okBtn.onclick = function() {
-            var bs = bootstrap.Modal.getInstance(modal);
-            bs.hide();
+            // confirmation OK clicked
+            // execute callback immediately, before we hide the dialog, to
+            // avoid situations where the form is removed from the DOM during
+            // the hide animation and the browser refuses to submit it.
             if (onOk) {
-                // delay slightly to ensure hide animation starts
-                setTimeout(onOk, 10);
+                try {
+                    onOk();
+                } catch (e) {
+                    console.error('error in onOk callback', e);
+                }
             }
+            var bs = bootstrap.Modal.getInstance(modal);
+            // now hide the modal (animation may still run but form has already
+            // been submitted)
+            if (bs) bs.hide();
         };
         if (onCancel) {
             cancelBtn.style.display = '';
@@ -1414,11 +1423,54 @@ window.addEventListener('DOMContentLoaded', function() {
 
     // mount/unmount confirmation on mounts.php
     var mountBtn = document.getElementById('btnMount');
+    var mountForm = document.getElementById('mountForm');
+    if (mountForm) {
+        // ensure submit wrapper still in place in case bootstrap relocates form
+        try {
+            var origSubmit = mountForm.submit;
+            mountForm.submit = function() {
+                origSubmit.call(mountForm);
+            };
+        } catch(e) {
+            // ignore
+        }
+    }
     if (mountBtn) {
         mountBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            showConfirmation('Mount the selected logical volume?\nThis will create or use /export/<em>subdir</em>.', function() {
-                mountBtn.form.submit();
+                e.preventDefault();
+            // gather the device and mount-point entered in the form so the
+            // confirmation message can show the real values instead of the
+            // generic placeholder used previously.
+            var form = mountBtn.form;
+            var dev = '';
+            var sub = '';
+            if (form) {
+                if (form.device_select_mount) {
+                    dev = form.device_select_mount.value || '';
+                }
+                if (form.mount_point) {
+                    sub = form.mount_point.value || '';
+                }
+            }
+            var msg = 'Mount the selected logical volume?';
+            if (dev) {
+                msg = 'Mount ' + dev + '?';
+            }
+            msg += '\nThis will create or use /export/' + (sub ? sub : '<em>subdir</em>') + '.';
+            showConfirmation(msg, function() {
+                // ensure mount button name included and submit
+                if (!mountBtn.form.querySelector('input[name="mount_lv"]')) {
+                    var hid = document.createElement('input');
+                    hid.type = 'hidden';
+                    hid.name = 'mount_lv';
+                    hid.value = mountBtn.value || '1';
+                    mountBtn.form.appendChild(hid);
+                }
+                try {
+                    mountBtn.form.submit();
+                } catch (e) {
+                    console.error('exception when calling submit', e);
+                }
             });
         });
     }
@@ -1751,6 +1803,9 @@ document.addEventListener('hidden.bs.modal', function() {
 
 // display any message that was provided by PHP via a hidden element
 window.addEventListener('DOMContentLoaded', function() {
+    // debugging persisted state from before reload
+    // cleared debug flag from prior runs
+    try { localStorage.removeItem('mountDebug'); } catch(e) {}
     var msgEl = document.getElementById('initialMessage');
     if (msgEl) {
         var text = msgEl.innerHTML;

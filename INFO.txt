@@ -1,0 +1,87 @@
+RNN (Red Neck NAS)
+------------------
+
+RNN is a lightweight web control plane for Linux storage.
+
+It does not maintain its own configuration database.
+It reads the live system state and executes native Linux
+commands to manage:
+
+  - MD RAID (mdadm)
+  - LVM (PV, VG, LV, thin pools, snapshots)
+  - Disk partitioning and wiping
+  - Filesystems (mkfs, mount, umount)
+  - /etc/fstab entries
+  - NFS exports (/etc/exports)
+
+The system itself remains the single source of truth.
+If something changes via SSH, the UI reflects it immediately.
+
+Requirements
+------------
+
+  - Linux system with:
+      mdadm
+      lvm2 tools
+      nfs-utils / nfs-kernel-server
+      util-linux (lsblk, mount, nsenter, etc.)
+      parted / sgdisk / wipefs
+      smartmontools
+  - PHP 7.4+
+  - Web server (Apache or Nginx)
+  - sudo configured for required storage commands
+  - Unix group named: nfs
+
+Only users in the "nfs" group may log in.
+Authentication uses system /etc/passwd and /etc/shadow.
+
+Design Goals
+------------
+
+  - No database
+  - No background daemons
+  - No duplicated config model
+  - Minimal JavaScript
+  - Small footprint (~360 KB total)
+  - Direct execution of native Linux tools
+  - Simple, readable, auditable code
+
+Behavior
+--------
+
+RNN:
+
+  - Queries the live system for all states
+  - Writes directly to system config files when required
+  - Uses sudo -n (non-interactive)
+  - Avoids hidden state or caching
+  - Fails cleanly if privileges are missing
+
+All destructive actions require confirmation.
+
+Security
+--------
+
+This interface executes system commands.
+It must only be accessible to trusted administrators.
+
+Use HTTPS.
+Restrict sudo permissions carefully.
+Limit membership of the "nfs" group.
+
+Warning
+-------
+
+This tool performs real storage operations.
+Incorrect use can destroy data.
+
+Use at your own risk.
+
+Testing
+-------
+
+You can run with the PHP built-in server:
+
+  php -S localhost:8000 -t /path/to/rnn
+
+End.

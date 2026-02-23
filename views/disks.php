@@ -719,6 +719,15 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
                                     }
                                     $usedBy .= $pvmap[$dev];
                                 }
+                                // if the disk has any partitions, note that in the used-by
+                                // column as “Partition”. this helps operators spot disks
+                                // with existing tables even if they’re not part of RAID/LVM.
+                                if (has_partitions($dev)) {
+                                    if ($usedBy !== '') {
+                                        $usedBy .= '; ';
+                                    }
+                                    $usedBy .= 'Partition';
+                                }
                             ?>
                             <tr class="<?php echo $rowClass; ?>" data-dev="<?php echo htmlspecialchars($dev); ?>" data-name="<?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?>" data-size="<?php echo htmlspecialchars($size); ?>" data-status="<?php echo htmlspecialchars($statusStr); ?>" data-usedby="<?php echo htmlspecialchars($usedBy); ?>">
                                     <td><?php echo htmlspecialchars($dev); ?></td>
