@@ -10,9 +10,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     } else {
         global $lastAuthError;
+        // always display a simple failure message; log specifics separately
         $err = 'Login failed';
         if (!empty($lastAuthError)) {
-            $err .= ': ' . htmlspecialchars($lastAuthError);
+            error_log("[lvm_nfs] login error detail user=$user reason=$lastAuthError");
         }
     }
 }

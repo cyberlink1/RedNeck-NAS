@@ -11,6 +11,12 @@ session_start();
 // hold a human-readable error from the last authentication attempt
 $lastAuthError = '';
 
+// record a failed authentication attempt; message is logged to PHP/syslog
+function log_auth_failure(string $user, string $reason): void
+{
+    error_log("[lvm_nfs] login failure user=$user reason=$reason");
+}
+
 /**
  * Authenticate a system user using /etc/shadow via getent.
  * Returns true on success, false otherwise.  On failure a message
@@ -39,6 +45,7 @@ function authenticate(string $user, string $password): bool
             error_log("[lvm_nfs] failed to write debug log: $msg");
         }
         $lastAuthError = "getent failed (status $status) - check permissions or sudoers entry";
+        log_auth_failure($user, $lastAuthError);
         // include the raw output for visibility
         if (!empty($output)) {
             $lastAuthError .= ' (output: ' . htmlspecialchars(implode(' | ', $output)) . ')';
@@ -47,6 +54,7 @@ function authenticate(string $user, string $password): bool
     }
     if (count($output) === 0) {
         $lastAuthError = "user not found in shadow";
+        log_auth_failure($user, $lastAuthError);
         return false;
     }
 
@@ -54,6 +62,7 @@ function authenticate(string $user, string $password): bool
     $parts = explode(':', $output[0]);
     if (count($parts) < 2 || empty($parts[1])) {
         $lastAuthError = "no hash available in shadow entry";
+        log_auth_failure($user, $lastAuthError);
         return false;
     }
     $hash = $parts[1];
@@ -61,6 +70,12 @@ function authenticate(string $user, string $password): bool
     // verify using PHP's crypt()
     $computed = @crypt($password, $hash);
     if ($computed === $hash) {
+        // successful password; enforce nfs group membership
+        if (!user_in_group($user, 'nfs')) {
+            $lastAuthError = "user $user is not authorized to use this interface";
+            log_auth_failure($user, $lastAuthError);
+            return false;
+        }
         $_SESSION['user'] = $user;
         return true;
     }
@@ -85,6 +100,11 @@ function authenticate(string $user, string $password): bool
             'output' => $out,
         ];
         if ($st === 0 && count($out) > 0 && trim($out[0]) === $hash) {
+            if (!user_in_group($user, 'nfs')) {
+                $lastAuthError = "user $user is not authorized to use this interface";
+                log_auth_failure($user, $lastAuthError);
+                return false;
+            }
             $_SESSION['user'] = $user;
             return true;
         }
@@ -104,6 +124,11 @@ function authenticate(string $user, string $password): bool
         ];
         // pamtester returns 0 on success
         if ($st === 0) {
+            if (!user_in_group($user, 'nfs')) {
+                $lastAuthError = "user $user is not authorized to use this interface";
+                log_auth_failure($user, $lastAuthError);
+                return false;
+            }
             $_SESSION['user'] = $user;
             return true;
         }
@@ -111,6 +136,7 @@ function authenticate(string $user, string $password): bool
 
     // build failure message with details
     $lastAuthError = "password did not match";
+    log_auth_failure($user, $lastAuthError);
     $lastAuthError .= ' (stored='.htmlspecialchars(substr($hash,0,20)).'..., computed='.htmlspecialchars(substr($computed,0,20)).'...)';
     // append helper diagnostic info
     foreach ($helperResults as $hr) {
@@ -125,6 +151,31 @@ function require_login()
         header('Location: login.php');
         exit;
     }
+    // if membership was revoked while session active, treat as logged out
+    if (!user_in_group($_SESSION['user'], 'nfs')) {
+        session_destroy();
+        header('Location: login.php');
+        exit;
+    }
+}
+
+/**
+ * Return true if the specified user belongs to the given group.
+ * This uses the `id -nG` command which reads /etc/group and does not
+ * require special privileges.
+ */
+function user_in_group(string $user, string $group): bool
+{
+    // `id -nG` prints space-separated group names for the account.
+    $cmd = 'id -nG ' . escapeshellarg($user);
+    $out = [];
+    $status = null;
+    exec($cmd . ' 2>&1', $out, $status);
+    if ($status !== 0 || count($out) === 0) {
+        return false;
+    }
+    $groups = preg_split('/\s+/', trim($out[0]));
+    return in_array($group, $groups, true);
 }
 
 /**

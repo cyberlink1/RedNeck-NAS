@@ -11,10 +11,14 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 - `mdadm` for RAID creation
 - NFS utils (`exportfs`, provided by `nfs-kernel-server`/`nfs-common`)
 - `nsenter` (from `util-linux`; used to inspect the host's mount namespace so all `/export/*` mounts are detected)
+- a Unix group named `nfs` (only members of this group may log into the web UI)
 - `parted`, `gdisk`/`sgdisk` and `wipefs` for disk partitioning and wiping
 - `smartmontools` for SMART status
 
 ## Installation
+
+1. Ensure there is a Unix group called `nfs` and add any administrative accounts to it.  The installer (`install.sh`) will create this group for you if it doesn't already exist.
+
 
 1. Place the directory under your web server's document root or configure a virtual host.
 2. Ensure the PHP process can read `/etc/shadow` (typically running as root or via sudo).  The code invokes `sudo getent shadow …`, and **sudoers entries must match the command path only**; arguments are not considered.  In other words, the previous example with `/usr/bin/getent shadow` did *not* match when the script added the username argument (`cl`), which is why you were still prompted for a password.  You should instead permit the `getent` binary itself (or allow any argument with a wildcard):
@@ -85,6 +89,7 @@ www-data ALL=(ALL) NOPASSWD: \
 > **Debugging login issues**
 >
 > - If the login form simply reloads with "Login failed" and the webserver logs show no errors, it's likely the PHP process cannot access `/etc/shadow`. The page will now display additional details like "getent failed" or "user not found".
+> - Failed authentication attempts are recorded in the webserver error log (look for lines prefixed `[lvm_nfs] login failure`). This can help track brute‑force or mis‑configured accounts.
 > - Try running `getent shadow username` as the same user the webserver runs as (e.g. `sudo -u www-data getent shadow youruser`).
 - If authentication still fails even though the password is correct, the system may be using a hashing algorithm that PHP's `crypt()` doesn’t support (e.g. `yescrypt`/`$y$`).  The page will now display the first part of the stored hash and the computed value; if the two differ wildly or the computed string is empty, that’s the issue.  In that case the code attempts a second check using Python’s `crypt` via `sudo` (glibc/libxcrypt may support the algorithm), so ensure `python3` is also allowed in your sudoers entry if you rely on this fallback.  If Python isn’t installed or its `crypt` module is missing the script then falls back to Perl (which has `crypt` built in), so allowing `/usr/bin/perl` is also recommended if you want maximum compatibility.
 > - Check PHP error reporting is enabled (the code now sets `display_errors`), and inspect the browser output for PHP warnings.
@@ -128,6 +133,7 @@ The logical‑volumes card will expand horizontally as needed to accommodate lon
 ## Security Notes
 
 - This interface executes shell commands; ensure proper escaping and restrict access to trusted administrators.
+- Only system accounts that are members of the `nfs` group may log in, so maintainers should keep that group limited to trusted users.
 - Consider running under HTTPS and enforcing strong authentication policies.
 - The current implementation is minimal and meant as a starting point.
 

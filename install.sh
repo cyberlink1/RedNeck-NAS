@@ -23,6 +23,14 @@ if ! id www-data &>/dev/null; then
     useradd -r -d /var/www -s /usr/sbin/nologin www-data
 fi
 
+# the web UI only allows authentication for accounts in the 'nfs' group;
+# create that group if it doesn't already exist so administrators can
+# add their users later.
+if ! getent group nfs &>/dev/null; then
+    echo "creating nfs group"
+    groupadd nfs
+fi
+
 # Create a sudoers drop‑in so we don't edit /etc/sudoers directly
 SUDOERS_FILE="/etc/sudoers.d/nfs-webui"
 cat <<'EOFS' > "$SUDOERS_FILE"
