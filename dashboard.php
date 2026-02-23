@@ -31,6 +31,15 @@ if ($view === 'lvm' && isset($_GET['ajax']) && $_GET['ajax'] === 'list_snaps' &&
 // prepare data structures; default to empty so count() never errors
 $lvs = [];
 $mnts = [];
+// helper for nsenter use (matching mounts view logic)
+$nsenterAvailable = file_exists('/usr/bin/nsenter');
+function nsCmdDash($cmd) {
+    global $nsenterAvailable;
+    if ($nsenterAvailable) {
+        return "sudo /usr/bin/nsenter -t 1 -m $cmd";
+    }
+    return $cmd;
+}
 // additional summary counts (only for root dashboard)
 $totalDrives = 0;
 $raidCount = 0;
@@ -39,9 +48,22 @@ $exports = [];
 if ($view === '') {
     // existing LV and mount listing
     $lvs = run_cmd('sudo lvs --noheadings -o lv_path,vg_name,lv_size');
-    $mnts = run_cmd("mount | grep ' on /export/'");
-    // strip the lone "(exit N)" record that grep emits when nothing matched
-    $mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
+    // determine mounts under /export or /exports by inspecting the host mount
+    // table. fallback to nsenter+grep if /proc/1/mounts isn't readable.
+    $mnts = [];
+    if (file_exists('/proc/1/mounts')) {
+        $lines = file('/proc/1/mounts', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $l) {
+            $fields = preg_split('/\s+/', trim($l));
+            if (isset($fields[1]) && preg_match('#^/exports?(?:/|$)#', $fields[1])) {
+                $mnts[] = $l;
+            }
+        }
+    } else {
+        $mnts = run_cmd(nsCmdDash("mount | grep -E ' on /exports?(?:/|$)'"));
+        // strip the lone "(exit N)" record that grep emits when nothing matched
+        $mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
+    }
 
     // count physical drives (lsblk shows TYPE column). we want to omit the
     // disk containing the root filesystem. determine its parent disk via
