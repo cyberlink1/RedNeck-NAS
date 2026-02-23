@@ -98,6 +98,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             run_cmd('exportfs -ra');
             $message = 'Export added.';
         }
+    } elseif (isset($_POST['edit_export'])) {
+        // update entire export line for a directory (remove any existing lines)
+        if (!empty($_POST['replace_dir']) && !empty($_POST['new_line'])) {
+            $dir = trim($_POST['replace_dir']);
+            $newLine = trim($_POST['new_line']);
+            $lines = read_exports();
+            $new = [];
+            foreach ($lines as $line) {
+                $ltrim = trim($line);
+                if ($ltrim === '' || strpos($ltrim, '#') === 0) {
+                    $new[] = $line;
+                    continue;
+                }
+                $parts = preg_split('/\s+/', $ltrim);
+                if (count($parts) > 0 && $parts[0] === $dir) {
+                    // skip existing export for this directory
+                    continue;
+                }
+                $new[] = $line;
+            }
+            // append the updated line once at end
+            $new[] = $newLine;
+            $content = implode("\n", $new) . (count($new) ? "\n" : '');
+            $cEsc = escapeshellarg($content);
+            run_cmd("echo $cEsc | sudo -n tee $exportsPath >/dev/null");
+            run_cmd('exportfs -ra');
+            $message = 'Export updated.';
+        }
     } elseif (isset($_POST['remove_export'])) {
         // new-style removal carries directory + client + opts separately
         if (isset($_POST['remove_dir'], $_POST['remove_client'])) {
@@ -206,6 +234,41 @@ foreach ($entries as $e) {
         $deviceMap[$d] = !empty($out) ? trim($out[0]) : '';
     }
 }
+
+// capture comments preceding each export line
+$comments = [];
+$lastComment = '';
+foreach ($rawExports as $line) {
+    $trim = trim($line);
+    if ($trim === '') {
+        $lastComment = '';
+        continue;
+    }
+    if (strpos($trim, '#') === 0) {
+        // store without leading '#'
+        $lastComment = trim(substr($trim, 1));
+        continue;
+    }
+    // export line
+    $parts = preg_split('/\s+/', $trim);
+    if (count($parts) > 0) {
+        $d = $parts[0];
+        if ($lastComment !== '') {
+            $comments[$d] = $lastComment;
+        }
+    }
+    $lastComment = '';
+}
+
+// group entries by directory for simpler display
+$grouped = [];
+foreach ($entries as $e) {
+    $d = $e['dir'];
+    if (!isset($grouped[$d])) {
+        $grouped[$d] = ['device' => $deviceMap[$d] ?? '', 'clients' => [], 'comment' => $comments[$d] ?? ''];
+    }
+    $grouped[$d]['clients'][] = ['client' => $e['client'], 'opts' => $e['opts']];
+}
 ?>
 
 <?php if ($message): ?>
@@ -221,43 +284,71 @@ foreach ($entries as $e) {
     </div>
 </div>
 
-<?php if (count($entries) > 0): ?>
+<?php if (count($grouped) > 0): ?>
 <table class="table table-sm table-hover" id="exportsTable">
     <thead>
         <tr>
             <th>Directory</th>
             <th>Device</th>
-            <th>Client</th>
-            <th>Options</th>
-            <th>Action</th>
+            <th>Comment</th>
         </tr>
     </thead>
     <tbody>
-    <?php foreach ($entries as $e): ?>
-        <tr>
-            <td><?php echo htmlspecialchars($e['dir']); ?></td>
-            <td><?php echo htmlspecialchars($deviceMap[$e['dir']]); ?></td>
-            <td><?php echo htmlspecialchars($e['client']); ?></td>
-            <td><?php echo htmlspecialchars($e['opts']); ?></td>
-            <td>
-                <form method="post" class="m-0">
-                    <input type="hidden" name="remove_dir" value="<?php echo htmlspecialchars($e['dir']); ?>">
-                    <input type="hidden" name="remove_client" value="<?php echo htmlspecialchars($e['client']); ?>">
-                    <input type="hidden" name="remove_opts" value="<?php echo htmlspecialchars($e['opts']); ?>">
-                    <button name="remove_export" class="btn btn-sm btn-danger btn-remove-export" type="submit">Remove</button>
-                </form>
-            </td>
+    <?php foreach ($grouped as $dir => $info): ?>
+        <tr data-dir="<?php echo htmlspecialchars($dir); ?>" class="clickable">
+            <td><?php echo htmlspecialchars($dir); ?></td>
+            <td><?php echo htmlspecialchars($info['device']); ?></td>
+            <td><?php echo htmlspecialchars($info['comment']); ?></td>
         </tr>
     <?php endforeach; ?>
     </tbody>
 </table>
+
+<script>
+// expose export data for client-side editing
+var exportClients = <?php echo json_encode($grouped, JSON_HEX_TAG|JSON_HEX_AMP); ?>;
+</script>
 <?php else: ?>
     <p>No exports defined.</p>
 <?php endif; ?>
 
+<!-- edit export modal -->
+<div class="modal fade" id="editExportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Edit export <span id="editExportDir"></span></h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+      <form id="editExportForm" method="post">
+            <input type="hidden" name="replace_dir" id="replace_dir">
+            <input type="hidden" name="new_line" id="new_line">
+            <div class="mb-3">
+                <label class="form-label">Comment</label>
+                <div id="editComment" class="form-control-plaintext"></div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Clients / options</label>
+                <table class="table table-sm" id="editClientTable">
+                    <thead>
+                        <tr><th>Client</th><th>Options</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+                <button type="button" id="addEditClientBtn" class="btn btn-sm btn-secondary">+ Add client</button>
+            </div>
+            <button name="edit_export" type="submit" class="btn btn-primary">Save</button>
+      </form>
+    </div>
+   </div>
+  </div>
+</div>
+
 <!-- create export modal -->
 <div class="modal fade" id="createExportModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
    <div class="modal-content">
     <div class="modal-header">
       <h5 class="modal-title">Add new export</h5>
@@ -299,7 +390,7 @@ foreach ($entries as $e) {
 
 <!-- client entry modal -->
 <div class="modal fade" id="clientEntryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-sm">
+  <div class="modal-dialog modal-lg">
    <div class="modal-content">
     <div class="modal-header">
       <h5 class="modal-title">Client entry</h5>
@@ -312,8 +403,77 @@ foreach ($entries as $e) {
           <input type="text" id="clientAddr" class="form-control" required>
         </div>
         <div class="mb-3">
-          <label class="form-label" for="clientOpts">Options</label>
-          <input type="text" id="clientOpts" class="form-control" placeholder="e.g. rw,sync">
+          <label class="form-label">Options</label>
+          <div class="row">
+            <div class="col-6 mb-2">
+              <label class="form-label" for="opt_rw_ro">Read/write</label>
+              <select id="opt_rw_ro" class="form-select small-select">
+                <option value=""></option>
+                <option value="rw">rw</option>
+                <option value="ro">ro</option>
+              </select>
+            </div>
+            <div class="col-6 mb-2">
+              <label class="form-label" for="opt_squash">Squash</label>
+              <select id="opt_squash" class="form-select small-select">
+                <option value=""></option>
+                <option value="root_squash">root-squash</option>
+                <option value="no_root_squash">no-root-squash</option>
+                <option value="all_squash">all-squash</option>
+              </select>
+            </div>
+            <div class="col-6 mb-2">
+              <label class="form-label" for="opt_sync">Sync</label>
+              <select id="opt_sync" class="form-select small-select">
+                <option value=""></option>
+                <option value="sync">sync</option>
+                <option value="async">async</option>
+              </select>
+            </div>
+            <div class="col-6 mb-2">
+              <label class="form-label" for="opt_subtree">Subtree</label>
+              <select id="opt_subtree" class="form-select small-select">
+                <option value=""></option>
+                <option value="subtree_check">subtree-check</option>
+                <option value="no_subtree_check">no-subtree-check</option>
+              </select>
+            </div>
+            <div class="col-6 mb-2">
+              <label class="form-label" for="opt_wdelay">Write delay</label>
+              <select id="opt_wdelay" class="form-select small-select">
+                <option value=""></option>
+                <option value="wdelay">wdelay</option>
+                <option value="no_wdelay">no-wdelay</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="opt_noaccess" value="noaccess">
+            <label class="form-check-label" for="opt_noaccess">noaccess</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="opt_crossmnt" value="crossmnt">
+            <label class="form-check-label" for="opt_crossmnt">crossmnt</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="opt_nohide" value="nohide">
+            <label class="form-check-label" for="opt_nohide">nohide</label>
+          </div>
+          <hr />
+          <div class="row">
+            <div class="col">
+              <label class="form-label" for="opt_anonuid">anonuid</label>
+              <input type="number" min="0" class="form-control" id="opt_anonuid">
+            </div>
+            <div class="col">
+              <label class="form-label" for="opt_anongid">anongid</label>
+              <input type="number" min="0" class="form-control" id="opt_anongid">
+            </div>
+            <div class="col">
+              <label class="form-label" for="opt_fsid">fsid</label>
+              <input type="number" min="0" class="form-control" id="opt_fsid">
+            </div>
+          </div>
         </div>
         <button type="submit" class="btn btn-primary btn-sm">OK</button>
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>

@@ -44,6 +44,20 @@ body {
     cursor: pointer;
 }
 
+/* ensure wide client tables inside modals scroll horizontally */
+#clientTable, #editClientTable {
+    width: 100%;
+    overflow-x: auto;
+    display: block;
+}
+
+/* small dropdowns inside modals */
+.small-select {
+    display: inline-block;
+    width: auto;
+    min-width: 120px;
+}
+
 /* make the large statistic numbers stand out */
 .stat-card .stat-number {
     font-size: 3rem;
