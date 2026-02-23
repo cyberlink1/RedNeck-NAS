@@ -97,7 +97,7 @@ $mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/',
 ?>
 
 <?php if ($message): ?>
-    <div id="initialMessage" style="display:none"><?php echo $message; ?></div>
+    <div id="initialMessage" class="d-none"><?php echo $message; ?></div>
 <?php endif; ?>
 
 <div class="row">

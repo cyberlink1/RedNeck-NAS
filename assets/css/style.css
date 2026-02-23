@@ -38,28 +38,23 @@ body {
     overflow-x: auto;
 }
 
-/* ensure modal footer buttons are aligned correctly
-   and split into two rows: action buttons above, close button below */
-.modal-footer {
-    display: flex;
-    flex-direction: column;
-    /* allow children to stretch full width */
-    align-items: stretch;
-}
-/* action-buttons container should occupy its own row and align right */
-.modal-footer .action-buttons {
-    display: flex;
-    justify-content: flex-end;
-    width: 100%;
-    margin-bottom: 0.5rem;
-}
-/* keep the close button on its own row, right‑aligned */
-.modal-footer [data-bs-dismiss="modal"] {
-    align-self: flex-end;
-    margin-left: 0;
-}
 
 /* clicking a row should feel interactive */
 .card-body table tbody tr {
     cursor: pointer;
+}
+
+/* simple full-screen spinner overlay used during long operations */
+#spinnerOverlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(255,255,255,0.8);
+    display: none !important;              /* override Bootstrap utilities */
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+#spinnerOverlay.show {
+    /* toggled via JS when an operation is in progress */
+    display: flex !important;
 }

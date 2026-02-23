@@ -91,6 +91,7 @@ function list_disks() {
 // POST handlers
 $message = '';
 $showVgAfter = false;
+$showLvAfter = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['init_pvs'])) {
         $sel = $_POST['disks'] ?? [];
@@ -114,10 +115,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // this prevents creation from aborting if old signatures exist
         $out = run_cmd("sudo lvcreate -n $name -L $size -y -Z y $vg");
         $message = implode("<br>", $out);
+        $showLvAfter = true;
     } elseif (isset($_POST['remove_lv'])) {
         $lv = escapeshellarg(trim($_POST['lv_select'] ?? ''));
         $out = run_cmd("sudo lvremove -fy $lv");
         $message = implode("<br>", $out);
+        $showLvAfter = true;
+    } elseif (isset($_POST['format_lv'])) {
+        $sel = $_POST['lvs'] ?? [];
+        if (!is_array($sel)) { $sel = [$sel]; }
+        $fs = escapeshellarg($_POST['fs_type']);
+        $outs = [];
+        if (count($sel) === 0) {
+            $message = 'No logical volumes selected to format.';
+        } else {
+            // build a human-readable list of the commands we intend to run so the
+            // user can see them in the feedback modal; this also aids debugging
+            // when the formatting appears to do nothing.
+            $cmds = [];
+            foreach ($sel as $lvpath) {
+                if (!$lvpath) continue;
+                // check if the volume is mounted; formatting a mounted device is
+                // dangerous and often prevented by mkfs, so warn instead.  the
+                // previous grep-based test could trigger false positives because
+                // mount output may mention the device even when not actually
+                // mounted (e.g. "devtmpfs on /dev" etc).  use lsblk which reports
+                // the mountpoint for the specific device.
+                $mpLines = run_cmd('lsblk -n -o MOUNTPOINT ' . escapeshellarg($lvpath));
+                $mp = trim($mpLines[0] ?? '');
+                if ($mp !== '') {
+                    $outs[] = "Skipping $lvpath: mounted at $mp (unmount before formatting).";
+                    continue;
+                }
+                $lv = escapeshellarg($lvpath);
+                $cmds[] = "sudo mkfs -F -t $fs $lv";
+                // include -F to force mkfs to proceed without any interactive
+                // confirmation (mirrors RAID formatting logic).
+                $out = run_cmd("sudo mkfs -F -t $fs $lv");
+                // collect output per lv
+                $outs[] = "Formatting $lvpath:";
+                $outs = array_merge($outs, $out);
+            }
+            if (count($cmds)) {
+                $message = 'Commands executed:<br>' . implode('<br>', array_map('htmlspecialchars', $cmds)) . '<br><br>';
+            } else {
+                $message = '';
+            }
+            // simple success message if no output
+            if (count($outs) === 0) {
+                $message .= 'Logical volumes formatted (no output).';
+            } else {
+                $message .= implode("<br>", $outs);
+            }
+        }
+        $showLvAfter = true;
     } elseif (isset($_POST['remove_vg'])) {
         $vgNames = $_POST['vg_select'] ?? [];
         if (!is_array($vgNames)) {
@@ -171,67 +222,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = implode("<br>", $outs);
         }
         $showVgAfter = true;
-    } elseif (isset($_POST['format_lv'])) {
-        $lv = escapeshellarg($_POST['lv_select2']);
-        $fs = escapeshellarg($_POST['fs_type']);
-        $out = run_cmd("sudo mkfs -t $fs $lv");
-        // determine if mkfs failed by seeing a nonzero exit marker
-        $failed = false;
-        foreach ($out as $line) {
-            if (preg_match('/\(exit\s+[1-9]/', $line)) {
-                $failed = true;
-                break;
-            }
-        }
-        if ($failed) {
-            $message = 'Failed to format logical volume.';
-        } else {
-            // try to extract UUID from mkfs output itself
-            $uuid = '';
-            foreach ($out as $line) {
-                if (preg_match('/Filesystem UUID:\s*(\S+)/i', $line, $m)) {
-                    $uuid = $m[1];
-                    break;
-                }
-                if (preg_match('/UUID="?([0-9A-Za-z\-]+)"?/', $line, $m)) {
-                    $uuid = $m[1];
-                    break;
-                }
-            }
-            // as a last resort we can still fall back to blkid if available
-            if (!$uuid) {
-                $uuidLines = run_cmd("sudo /usr/sbin/blkid -s UUID -o value " . escapeshellarg($lv));
-                foreach ($uuidLines as $line) {
-                    $line = trim($line);
-                    if ($line === ''
-                        || stripos($line, 'password is required') !== false
-                        || stripos($line, 'sudo:') === 0
-                        || preg_match('/^\(exit\s+\d+\)/', $line)
-                    ) {
-                        continue;
-                    }
-                    $uuid = $line;
-                    break;
-                }
-                if (!$uuid) {
-                    $alt = run_cmd("sudo /usr/sbin/blkid " . escapeshellarg($lv));
-                    foreach ($alt as $line) {
-                        if (preg_match('/UUID="([^"]+)"/', $line, $m)) {
-                            $uuid = $m[1];
-                            break;
-                        }
-                    }
-                }
-            }
-            $message = 'Logical volume formatted successfully.';
-            if ($uuid) {
-                $message .= '<br>Filesystem UUID: ' . htmlspecialchars($uuid);
-            } else {
-                $message .= ' (UUID lookup failed; ensure /usr/sbin/blkid is available to sudo)';
-            }
-        }
     }
-    // end POST handler for $\_SERVER
+    // end POST handler for $_SERVER
 }
 
 // prepare data for rendering
@@ -301,14 +293,28 @@ $anyAvailable = false;
 foreach ($rows as $r) {
     if ($r['available']) { $anyAvailable = true; break; }
 }
+// gather available mkfs filesystem types
+$fsTypes = [];
+foreach (glob('/sbin/mkfs.*') as $path) {
+    $base = basename($path);
+    if (preg_match('/^mkfs\.(.+)$/', $base, $m)) {
+        $fsTypes[] = $m[1];
+    }
+}
+sort($fsTypes);
 ?>
 
 <?php if ($message): ?>
-    <div id="initialMessage" style="display:none"<?php if ($showVgAfter) echo ' data-reopen-vg="1"'; ?>><?php echo $message; ?></div>
+    <div id="initialMessage" class="d-none"<?php if ($showVgAfter) echo ' data-reopen-vg="1"'; ?><?php if ($showLvAfter) echo ' data-reopen-lv="1"'; ?>><?php echo $message; ?></div>
 <?php endif; ?>
+<!-- global spinner overlay -->
+<div id="spinnerOverlay">
+    <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
+</div>
 
 <!-- button to launch VG management modal -->
-<button id="btnShowVgModal" class="btn btn-primary mb-3">Volume groups</button>
+<button id="btnShowVgModal" class="btn btn-primary mb-3 me-2">Volume groups</button>
+<button id="btnShowLvModal" class="btn btn-primary mb-3">Logical volumes</button>
 
 <div class="row">
     <div class="col-md-6">
@@ -353,87 +359,169 @@ foreach ($rows as $r) {
             </div>
         </div>
     </div>
-    <!-- LV card remains; VG accessible via modal button -->
-    <div class="col-md-auto">
-        <div class="card mb-3">
-            <div class="card-header">Logical Volumes</div>
-            <div class="card-body">
-                <?php if (count($lvs) === 0): ?>
-                    <em>No logical volumes present.</em>
-                <?php else: ?>
-                    <pre><?php echo htmlspecialchars(implode("\n", $lvs)); ?></pre>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
+
+<!-- LV management button and modals will handle logical volumes -->
 </div>
 
+<!-- LV management modal -->
+<div class="modal fade" id="lvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Logical Volumes</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <?php if (count($lvs) === 0): ?>
+            <em>No logical volumes present.</em>
+        <?php else: ?>
+            <table class="table table-sm">
+                <thead>
+                    <tr><th></th><th>Device</th><th>Volume Group</th><th>Filesystem</th><th>Size</th></tr>
+                </thead>
+                <tbody>
+                <?php foreach ($lvs as $line):
+                    $parts = preg_split('/\s+/', trim($line));
+                    $lvpath = $parts[0] ?? '';
+                    $vgname = $parts[1] ?? '';
+                    $lvsize = $parts[2] ?? '';
+                    if (!$lvpath) continue;
+                    $display = basename($lvpath);
+                    // determine filesystem type if available
+                    $fstype = '';
+                    $blk = run_cmd('sudo blkid -s TYPE -o value ' . escapeshellarg($lvpath));
+                    if (count($blk)) {
+                        $fstype = trim($blk[0]);
+                        // blkid returns a status line like "(exit 2)" when it can't
+                        // identify the filesystem; treat that as no filesystem.
+                        if ($fstype === '' || preg_match('/^\(exit\s+\d+\)/', $fstype)) {
+                            $fstype = '';
+                        }
+                    }
+                    if ($fstype === '') {
+                        $fstype = 'None';
+                    }
+                ?>
+                    <tr>
+                        <td><input type="checkbox" class="lv-checkbox" value="<?php echo htmlspecialchars($lvpath); ?>"></td>
+                        <td><?php echo htmlspecialchars($display); ?></td>
+                        <td><?php echo htmlspecialchars($vgname); ?></td>
+                        <td><?php echo htmlspecialchars($fstype); ?></td>
+                        <td><?php echo htmlspecialchars($lvsize); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+      </div>
+      <div class="modal-footer d-flex justify-content-end flex-nowrap">
+        <button id="btnOpenCreateLv" class="btn btn-primary btn-sm me-1">Create</button>
+        <button id="btnOpenFormatLv" class="btn btn-warning btn-sm me-1">Format</button>
+        <button id="btnOpenRemoveLv" class="btn btn-danger btn-sm me-1">Remove</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 
-<div class="row">
-    <div class="col-md-6">
-        <div class="card mb-3">
-            <div class="card-header">Create Logical Volume</div>
-            <div class="card-body">
-                <form method="post">
-                    <div class="mb-3">
-                        <label class="form-label">VG</label>
-                        <select name="lv_vg" class="form-select" required>
-                            <option value="">-- choose --</option>
-                            <?php foreach ($vgs as $line) {
-                                $parts = preg_split('/\s+/', trim($line));
-                                $vgname = $parts[0] ?? '';
-                                if (!$vgname) continue;
-                            ?>
-                            <option value="<?php echo htmlspecialchars($vgname); ?>"><?php echo htmlspecialchars($vgname); ?></option>
-                            <?php } ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">LV Name</label>
-                        <input name="lv_name" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Size (e.g. 10G)</label>
-                        <input name="lv_size" class="form-control" required>
-                    </div>
-                    <button name="create_lv" type="submit" class="btn btn-primary">Create LV</button>
-                </form>
+<!-- create LV modal -->
+<div class="modal fade" id="createLvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Create Logical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="createLvForm">
+            <div class="mb-3">
+                <label class="form-label">VG</label>
+                <select name="lv_vg" class="form-select" required>
+                    <option value="">-- choose --</option>
+                    <?php foreach ($vgs as $line) {
+                        $parts = preg_split('/\s+/', trim($line));
+                        $vgname = $parts[0] ?? '';
+                        if (!$vgname) continue;
+                    ?>
+                    <option value="<?php echo htmlspecialchars($vgname); ?>"><?php echo htmlspecialchars($vgname); ?></option>
+                    <?php } ?>
+                </select>
             </div>
-        </div>
-    </div>
-</div>
-    <!-- removal/format section -->
-    <div class="row">
-        <div class="col-md-6">
-            <div class="card mb-3">
-                <div class="card-header">Format Logical Volume</div>
-                <div class="card-body">
-                    <form method="post">
-                        <div class="mb-3">
-                            <label class="form-label">Select Logical Volume</label>
-                            <select name="lv_select2" class="form-select" required>
-                                <option value="">-- choose --</option>
-                                <?php foreach ($lvs as $line) {
-                                    $parts = preg_split('/\s+/', trim($line));
-                                    $lvpath = $parts[0] ?? '';
-                                    if (!$lvpath) continue;
-                                    $display = basename($lvpath);
-                                ?>
-                                <option value="<?php echo htmlspecialchars($lvpath); ?>"><?php echo htmlspecialchars($display); ?></option>
-                                <?php } ?>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Filesystem type</label>
-                            <input name="fs_type" class="form-control" value="ext4" required>
-                        </div>
-                        <button id="btnFormatLv" name="format_lv" class="btn btn-warning" type="submit">Format LV</button>
-                    </form>
-                </div>
+            <div class="mb-3">
+                <label class="form-label">LV Name</label>
+                <input name="lv_name" class="form-control" required>
             </div>
-        </div>
+            <div class="mb-3">
+                <label class="form-label">Size (e.g. 10G)</label>
+                <input name="lv_size" class="form-control" required>
+            </div>
+            <button name="create_lv" type="submit" class="btn btn-primary">Create LV</button>
+        </form>
+      </div>
     </div>
+  </div>
 </div>
+
+<!-- format LV modal -->
+<div class="modal fade" id="formatLvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Format Logical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="formatLvForm">
+            <div id="formatList" class="mb-3">
+                <!-- list of selected volumes inserted by JS -->
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Filesystem type</label>
+                <select name="fs_type" class="form-select" required>
+                    <?php foreach ($fsTypes as $t) {
+                        $sel = ($t === 'ext4') ? ' selected' : '';
+                        echo '<option'.$sel.'>'.htmlspecialchars($t).'</option>';
+                    } ?>
+                </select>
+            </div>
+            <button name="format_lv" class="btn btn-warning">Format LV(s)</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- remove LV modal -->
+<div class="modal fade" id="removeLvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Remove Logical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="removeLvForm">
+            <div class="mb-3">
+                <label class="form-label">Select Logical Volume</label>
+                <select name="lv_select" class="form-select" required>
+                    <option value="">-- choose --</option>
+                    <?php foreach ($lvs as $line) {
+                        $parts = preg_split('/\s+/', trim($line));
+                        $lvpath = $parts[0] ?? '';
+                        if (!$lvpath) continue;
+                        $display = basename($lvpath);
+                    ?>
+                    <option value="<?php echo htmlspecialchars($lvpath); ?>"><?php echo htmlspecialchars($display); ?></option>
+                    <?php } ?>
+                </select>
+            </div>
+            <button name="remove_lv" class="btn btn-danger">Remove LV</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <!-- confirmation modal used by JS -->
 <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
@@ -577,10 +665,7 @@ foreach ($rows as $r) {
 </div>
 
 <!-- modal containing extend VG form -->
-<div class="modal fade" id="extendVgModal" tabindex="-1" aria-hidden="true">
-<script>
-var unassignedPvs = <?php echo json_encode($unassigned); ?>;
-</script>
+<div class="modal fade" id="extendVgModal" tabindex="-1" aria-hidden="true" data-unassigned-pvs='<?php echo htmlspecialchars(json_encode($unassigned), ENT_QUOTES); ?>'>
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">

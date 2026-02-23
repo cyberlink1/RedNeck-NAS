@@ -569,7 +569,7 @@ if ($selected) {
             <button id="btnOpenDelete" class="btn btn-danger ms-2" data-disk="<?php echo htmlspecialchars($selected); ?>">Delete Partition</button>
             <button id="btnOpenFormat" class="btn btn-secondary ms-2" data-disk="<?php echo htmlspecialchars($selected); ?>">Format Partition</button>
             <?php endif; ?>
-            <form method="post" style="display:inline" class="ms-2">
+            <form method="post" class="d-inline ms-2">
                 <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
                 <button id="btnWipe" name="wipe_disk" class="btn btn-warning">Wipe disk</button>
             </form>
@@ -617,7 +617,7 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
 ?>
 
 <?php if ($message): ?>
-    <div id="initialMessage" style="display:none"><?php echo $message; ?></div>
+    <div id="initialMessage" class="d-none"><?php echo $message; ?></div>
 <?php endif; ?>
 
 <div class="row">

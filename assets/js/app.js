@@ -1,6 +1,30 @@
 // General JS helpers
 console.log('App script loaded');
 
+// spinner handling – overlay is hidden by default, toggled by adding/removing
+// the "show" class (see assets/css/style.css).  In addition we hook the
+// document-level submit event so any page navigation displays the overlay.
+function showSpinner() {
+    var o = document.getElementById('spinnerOverlay');
+    if (o) o.classList.add('show');
+}
+function hideSpinner() {
+    var o = document.getElementById('spinnerOverlay');
+    if (o) o.classList.remove('show');
+}
+document.addEventListener('submit', function(e) {
+    // when any form is actually submitted (including via JS), show the spinner.
+    // however confirmation handlers call preventDefault(), and they run before
+    // this listener (document was bound earlier) so the overlay would flash even
+    // when the submission is cancelled.  Delay execution to the next tick and
+    // only display if the event wasn't prevented.
+    setTimeout(function() {
+        if (!e.defaultPrevented) {
+            showSpinner();
+        }
+    }, 0);
+});
+
 // cache of filesystem types read from the initial page; used as a fallback
 // if a modal loses its options after an AJAX refresh of the info modal.
 var cachedFsTypes = [];
@@ -52,6 +76,12 @@ document.addEventListener('DOMContentLoaded', function() {
             new bootstrap.Modal(document.getElementById('vgModal')).show();
         });
     }
+    var showLvBtn = document.getElementById('btnShowLvModal');
+    if (showLvBtn) {
+        showLvBtn.addEventListener('click', function() {
+            new bootstrap.Modal(document.getElementById('lvModal')).show();
+        });
+    }
     var createVgBtn = document.getElementById('btnOpenCreateVg');
     if (createVgBtn) {
         createVgBtn.addEventListener('click', function() {
@@ -59,6 +89,100 @@ document.addEventListener('DOMContentLoaded', function() {
             var inst = bootstrap.Modal.getInstance(vgModal);
             if (inst) inst.hide();
             new bootstrap.Modal(document.getElementById('createVgModal')).show();
+        });
+    }
+    var openCreateLv = document.getElementById('btnOpenCreateLv');
+    if (openCreateLv) {
+        openCreateLv.addEventListener('click', function() {
+            var lvModal = document.getElementById('lvModal');
+            var inst = bootstrap.Modal.getInstance(lvModal);
+            if (inst) inst.hide();
+            new bootstrap.Modal(document.getElementById('createLvModal')).show();
+        });
+    }
+    var openFormatLv = document.getElementById('btnOpenFormatLv');
+    if (openFormatLv) {
+        openFormatLv.addEventListener('click', function() {
+            var selected = Array.from(document.querySelectorAll('#lvModal tbody input.lv-checkbox:checked')).map(function(cb){return cb.value;});
+            if (selected.length === 0) {
+                showConfirmation('Please select at least one logical volume to format.');
+                return;
+            }
+            var listContainer = document.getElementById('formatList');
+            listContainer.innerHTML = '<label class="form-label">Volumes to format</label>';
+            selected.forEach(function(lv) {
+                var div = document.createElement('div');
+                div.textContent = lv;
+                var hid = document.createElement('input');
+                hid.type = 'hidden'; hid.name = 'lvs[]'; hid.value = lv;
+                div.appendChild(hid);
+                listContainer.appendChild(div);
+            });
+            var lvModal = document.getElementById('lvModal');
+            var inst = bootstrap.Modal.getInstance(lvModal);
+            if (inst) inst.hide();
+            new bootstrap.Modal(document.getElementById('formatLvModal')).show();
+        });
+    }
+    var openRemoveLv = document.getElementById('btnOpenRemoveLv');
+    if (openRemoveLv) {
+        openRemoveLv.addEventListener('click', function() {
+            var checked = document.querySelector('#lvModal tbody input.lv-checkbox:checked');
+            if (checked) {
+                var sel = document.querySelector('#removeLvForm select[name="lv_select"]');
+                if (sel) sel.value = checked.value;
+            }
+            var lvModal = document.getElementById('lvModal');
+            var inst = bootstrap.Modal.getInstance(lvModal);
+            if (inst) inst.hide();
+            new bootstrap.Modal(document.getElementById('removeLvModal')).show();
+        });
+    }
+    // toggle checkbox when clicking on a row in the LV table
+    var lvModalElt = document.getElementById('lvModal');
+    if (lvModalElt) {
+        lvModalElt.addEventListener('shown.bs.modal', function() {
+            document.querySelectorAll('#lvModal tbody tr').forEach(function(row) {
+                row.addEventListener('click', function(e) {
+                    if (e.target.type !== 'checkbox') {
+                        var cb = row.querySelector('input.lv-checkbox');
+                        if (cb) cb.checked = !cb.checked;
+                    }
+                });
+            });
+        });
+    }
+    // confirm format and removal forms
+    var formatLvForm = document.getElementById('formatLvForm');
+    if (formatLvForm) {
+        formatLvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Format the selected logical volume? Any data on it will be lost.', function() {
+                // add hidden field to indicate which action we're performing since
+                // programmatic submit() does not include the button name/value.
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = 'format_lv';
+                inp.value = '1';
+                formatLvForm.appendChild(inp);
+                showSpinner();
+                formatLvForm.submit();
+            });
+        });
+    }
+    var removeLvForm = document.getElementById('removeLvForm');
+    if (removeLvForm) {
+        removeLvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Remove the selected logical volume? This is irreversible.', function() {
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = 'remove_lv';
+                inp.value = '1';
+                removeLvForm.appendChild(inp);
+                showSpinner();
+                removeLvForm.submit();
+            });
         });
     }
     var openRemoveVg = document.getElementById('btnOpenRemoveVg');
@@ -102,6 +226,16 @@ document.addEventListener('DOMContentLoaded', function() {
             if (selected.length === 0) {
                 showConfirmation('Please select at least one volume group to extend.');
                 return;
+            }
+            // read unassignedPvs from data attribute on extendVgModal
+            var extendModal = document.getElementById('extendVgModal');
+            var unassignedPvs = [];
+            if (extendModal && extendModal.dataset.unassignedPvs) {
+                try {
+                    unassignedPvs = JSON.parse(extendModal.dataset.unassignedPvs);
+                } catch (e) {
+                    console.error('failed to parse unassignedPvs', e);
+                }
             }
             var modal = document.getElementById('extendSelectedVgModal');
             var bodyForm = modal.querySelector('#extendSelectedForm');
@@ -238,17 +372,29 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // when certain modals close, return to their parent (VG or LV) modal
     ['createVgModal','extendVgModal','extendSelectedVgModal'].forEach(function(id) {
         var m = document.getElementById(id);
         if (m) {
             m.addEventListener('hidden.bs.modal', function() {
-                // if a confirmation dialog is pending, skip reopening parent;
-                // the showConfirmation logic will clear the flag when done.
                 if (window._confirmActive) {
                     return;
                 }
                 var vg = document.getElementById('vgModal');
                 var bs = bootstrap.Modal.getInstance(vg) || new bootstrap.Modal(vg);
+                bs.show();
+            });
+        }
+    });
+    ['createLvModal','formatLvModal','removeLvModal'].forEach(function(id) {
+        var m = document.getElementById(id);
+        if (m) {
+            m.addEventListener('hidden.bs.modal', function() {
+                if (window._confirmActive) {
+                    return;
+                }
+                var lv = document.getElementById('lvModal');
+                var bs = bootstrap.Modal.getInstance(lv) || new bootstrap.Modal(lv);
                 bs.show();
             });
         }
@@ -1034,16 +1180,23 @@ window.addEventListener('DOMContentLoaded', function() {
     var msgEl = document.getElementById('initialMessage');
     if (msgEl) {
         var text = msgEl.innerHTML;
-        var reopen = msgEl.dataset.reopenVg === '1';
+        var reopenVg = msgEl.dataset.reopenVg === '1';
+        var reopenLv = msgEl.dataset.reopenLv === '1';
         if (text) {
             showConfirmation(text, function() {
-                if (reopen) {
+                if (reopenVg) {
                     new bootstrap.Modal(document.getElementById('vgModal')).show();
+                }
+                if (reopenLv) {
+                    new bootstrap.Modal(document.getElementById('lvModal')).show();
                 }
             });
         } else {
-            if (reopen) {
+            if (reopenVg) {
                 new bootstrap.Modal(document.getElementById('vgModal')).show();
+            }
+            if (reopenLv) {
+                new bootstrap.Modal(document.getElementById('lvModal')).show();
             }
         }
         msgEl.parentNode.removeChild(msgEl);

@@ -35,7 +35,7 @@ $exports = read_exports();
 ?>
 
 <?php if ($message): ?>
-    <div id="initialMessage" style="display:none"><?php echo $message; ?></div>
+    <div id="initialMessage" class="d-none"><?php echo $message; ?></div>
 <?php endif; ?>
 
 <div class="card mb-3">

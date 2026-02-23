@@ -434,7 +434,7 @@ if (isset($_GET['ajax']) && isset($_GET['raid'])) {
 ?>
 
 <?php if ($message): ?>
-    <div id="initialMessage" style="display:none"><?php echo $message; ?></div>
+    <div id="initialMessage" class="d-none"><?php echo $message; ?></div>
 <?php endif; ?>
 
 
