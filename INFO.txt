@@ -1,4 +1,4 @@
-RNN (Red Neck NAS)
+RNN (RedNeck NAS)
 ------------------
 
 RNN is a lightweight web control plane for Linux storage.

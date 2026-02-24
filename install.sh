@@ -7,7 +7,7 @@
 #
 set -euo pipefail
 
-REQUIRED_PKGS=(sudo libxcrypt2 pamtester lvm2 php php-cli apache2 php-common mdadm util-linux parted gdisk smartmontools nfs-kernel-server)
+REQUIRED_PKGS=(sudo pamtester lvm2 php php-cli apache2 php-common mdadm util-linux parted gdisk smartmontools nfs-kernel-server)
 # apache2/php packages above are typical; adjust if using nginx
 # add nfs-kernel-server so exportfs and related utilities are available
 
@@ -37,11 +37,16 @@ cat <<'EOFS' > "$SUDOERS_FILE"
 # sudo permissions for NFS/LVM web interface
 Defaults:www-data !requiretty
 www-data ALL=(ALL) NOPASSWD: \
-    /usr/bin/getent, /usr/bin/nsenter, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
-    /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/rmdir, \
-    /usr/sbin/parted, /usr/sbin/sgdisk, /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, \  # tee required for fstab updates
-    /usr/bin/pamtester, /usr/bin/python3, /usr/bin/perl, \
-    /bin/echo, /bin/cat, /bin/grep
+    /usr/bin/getent, /usr/bin/nsenter, /sbin/mdadm, /usr/sbin/mdadm, \
+    /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, \
+    /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, \
+    /sbin/pvcreate, /sbin/pvremove, /sbin/pvs, /sbin/vgs, /sbin/lvs, \
+    /sbin/exportfs, /usr/sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, \
+    /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, \
+    /bin/mkdir, /bin/rmdir, /usr/sbin/parted, /usr/sbin/sgdisk, \
+    /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, /usr/bin/pamtester, \
+    /usr/bin/python3, /usr/bin/perl, /bin/echo, /bin/cat, /bin/grep
+
 # allow lookups with arguments
 www-data ALL=(ALL) NOPASSWD: /usr/bin/getent shadow *
 EOFS
