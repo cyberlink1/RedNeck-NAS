@@ -1,0 +1,2 @@
+# ignore deployment script, should not be committed
+deploy.sh
