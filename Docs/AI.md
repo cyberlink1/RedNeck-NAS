@@ -25,3 +25,4 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
 - All CSS must be in the site CSS file, NO inline CSS!
 - Always lint your code.
 - Do not do git functions without being asked.
+- Do not edit the README.md

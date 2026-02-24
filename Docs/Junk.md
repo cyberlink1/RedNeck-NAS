@@ -27,7 +27,7 @@ www-data ALL=(ALL) NOPASSWD: \
     /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
     /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/chown, /bin/rmdir, \
     /usr/sbin/exportfs, \
-    /usr/sbin/parted, /usr/sbin/sgdisk, /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, \  # tee needed for adding fstab entries
+    /usr/sbin/parted, /usr/sbin/sgdisk, /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, /bin/systemctl \  # tee needed for adding fstab entries; systemctl reloads units
     /usr/bin/pamtester, /usr/bin/python3, /usr/bin/perl, /bin/echo, \
     /bin/cat, /bin/grep, /bin/mv
    # or more narrowly: /usr/bin/getent shadow *, /usr/bin/lsblk

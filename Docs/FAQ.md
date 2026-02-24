@@ -88,7 +88,15 @@
 
 ---
 
-### 11. How are NFS exports managed?
+### 11. When fstab is modified does systemd pick up the changes?
+
+**Q:** After RNN updates `/etc/fstab`, why doesn't `systemctl` recognize the change?  
+
+**A:** The web UI now runs `systemctl daemon-reload` automatically whenever it writes or removes a line, so systemd is immediately aware of new or removed mount units. The installer adds `/bin/systemctl` to the sudoers drop‑in; if you modify sudoers manually, make sure `systemctl` is permitted.
+
+---
+
+### 12. How are NFS exports managed?
 
 **Q:** How are NFS exports managed?  
 

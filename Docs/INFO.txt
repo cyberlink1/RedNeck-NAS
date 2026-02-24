@@ -11,7 +11,7 @@ commands to manage:
   - LVM (PV, VG, LV, thin pools, snapshots)
   - Disk partitioning and wiping
   - Filesystems (mkfs, mount, umount)
-  - /etc/fstab entries
+  - /etc/fstab entries (systemd daemon-reload automatically)
   - NFS exports (/etc/exports)
 
 The system itself remains the single source of truth.

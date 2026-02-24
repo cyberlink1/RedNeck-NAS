@@ -5,3 +5,5 @@
 .rsync.exclude
 /Docs/
 /Docs/**
+/Screen Shots/
+/Screen Shots/**

@@ -135,6 +135,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $statusMsg .= ' (fstab update failed: ' . htmlspecialchars(implode(' | ', $teeOut)) . ')';
                 } else {
                     $statusMsg .= ' (added to /etc/fstab)';
+                    // reload systemd so the new mount unit is registered
+                    $reload = run_cmd("sudo -n /bin/systemctl daemon-reload");
+                    if (preg_grep('/\(exit\s+[1-9]/', $reload)) {
+                        $statusMsg .= ' (systemctl daemon-reload failed: ' . htmlspecialchars(implode(' | ', $reload)) . ')';
+                    } else {
+                        $statusMsg .= ' (systemd reloaded)';
+                    }
                 }
             }
             // on success we display only the status message
@@ -201,6 +208,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $mvout = run_cmd('sudo -n mv /etc/fstab.tmp /etc/fstab');
         foreach ($mvout as $l) { $out[] = "mv> $l"; }
+        // if we actually removed an entry make systemd reload the unit files
+        if ($haveEntry) {
+            $reload = run_cmd("sudo -n /bin/systemctl daemon-reload");
+            if (preg_grep('/\(exit\\s+[1-9]/', $reload)) {
+                $out[] = "systemctl daemon-reload failed: " . implode(' | ', $reload);
+            } else {
+                $statusMsg .= ' (systemd reloaded)';
+            }
+        }
         // examine unmount result for status
         $failed = preg_grep('/\(exit\s+[1-9]/', $out);
         if (!$failed) {
@@ -341,6 +357,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $statusMsg .= ' (fstab updated)';
             }
+        }
+
+        // ensure systemd reloads after any fstab edits (entry removed or added)
+        $reload = run_cmd("sudo -n /bin/systemctl daemon-reload");
+        if (preg_grep('/\(exit\s+[1-9]/', $reload)) {
+            $statusMsg .= ' (systemctl daemon-reload failed: ' . htmlspecialchars(implode(' | ', $reload)) . ')';
+        } else {
+            $statusMsg .= ' (systemd reloaded)';
         }
 
         if (strpos($statusMsg,'Mount succeeded') === 0) {
