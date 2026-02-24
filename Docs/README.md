@@ -1,3 +1,21 @@
+## RNN (RedNeck NAS)
+
+RNN is a lightweight web control plane for Linux storage.
+
+It does not maintain its own configuration database.
+It reads the live system state and executes native Linux
+commands to manage:
+
+  - MD RAID (mdadm)
+  - LVM (PV, VG, LV, thin pools, snapshots)
+  - Disk partitioning and wiping
+  - Filesystems (mkfs, mount, umount)
+  - /etc/fstab entries
+  - NFS exports (/etc/exports)
+
+The system itself remains the single source of truth.
+If something changes via SSH, the UI reflects it immediately.
+
 ## Why I Built RNN
 
 I’ve worked in IT for over 35 years as a Linux administrator and engineer.
