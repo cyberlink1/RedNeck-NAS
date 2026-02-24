@@ -20,7 +20,7 @@ If something changes via SSH, the UI reflects it immediately.
 Requirements
 ------------
 
-  - Linux system with:
+  - Linux system (debian 13) with:
       mdadm
       lvm2 tools
       nfs-utils / nfs-kernel-server
