@@ -108,12 +108,12 @@ During installation:
 
 Finish installation and reboot.
 
-SCP repo contents to server
-Debian minimal does not install sudo by default.
-su -
-cd /home/(username where you uploaded repo)
-./install.sh
-usermod -aG nfs youruser
-open browser to http://server-ip/
+- SCP repo contents to server.
+- Debian minimal does not install sudo by default.
+- su -
+- cd /home/(username where you uploaded repo)
+- ./install.sh
+- usermod -aG nfs youruser
+- open browser to http://server-ip/
 
 The install.sh is less than 100 lines and designed to run on Debian 13 Trixie. Though the only changes needed to run on another distro is the package names and package managment install. 
