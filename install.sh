@@ -78,16 +78,19 @@ SRC_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cp -r "$SRC_DIR"/* "$WEBROOT/"
 # adjust ownership so apache can read/write if necessary
 chown -R www-data:www-data "$WEBROOT"
-
+rm -r "$WEBROOT/.git" "$WEBROOT/.github" 2>/dev/null || true
+rm -r "$WEBROOT/*.md" "$WEBROOT/*.txt" 2>/dev/null || true
+rm -r "$WEBROOT/*.sh" 2>/dev/null || true
 
 cat <<'EOF'
 
 Installation complete.
 
 Next steps:
- 1. Place the web UI directory under /var/www/html or use the provided deploy.sh.
- 2. Ensure file permissions allow www-data to read the files.
- 3. Configure firewall to allow HTTP/HTTPS and SSH.
+ 1. Ensure file permissions allow www-data to read the files.
+ 2. Configure firewall to allow HTTP/HTTPS and SSH.
+ 3. Add your user account to the 'nfs' group to allow authentication in the web UI:
+    sudo usermod -aG nfs <username>
  4. Visit http://<host>/ in a browser and log in with a system account.
 
 EOF
