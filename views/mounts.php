@@ -37,7 +37,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // ensure mountpoint directory exists; capture any errors so we can report them
+        // remember whether it existed before creation so we only adjust ownership
+        // on newly-created paths (the export requirement only applies before a
+        // filesystem is mounted).
+        $existed = is_dir($mp);
         $out = run_cmd("sudo -n /bin/mkdir -p $mpEsc");
+        // if we just created the directory, set owner to nobody:nogroup so NFS can
+        // later export it even when a filesystem is mounted there.
+        if (!$existed && is_dir($mp)) {
+            $chownOut = run_cmd("sudo -n /bin/chown nobody:nogroup $mpEsc");
+            if (preg_grep('/\(exit\s+[1-9]/', $chownOut)) {
+                $out = array_merge($out, ['chown failed: ' . implode(' | ', $chownOut)]);
+            }
+        }
         // if the directory creation failed the mount is pointless; show the
         // mkdir output and don't attempt to execute mount, which may otherwise
         // produce misleading "succeeded but not listed" messages.
@@ -217,7 +229,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // device, so we don't need the $dev variable here except for diagnostics.
         // ensure the mountpoint directory exists just in case the caller
         // changed the name (unlikely but harmless).
+        // ensure the (possibly renamed) mountpoint exists; if it was absent
+        // previously make sure to give it the correct owner so NFS can export it
+        // prior to a mount being placed on top of it.
+        $existed = is_dir($mp);
         $out = run_cmd("sudo /bin/mkdir -p $mpEsc");
+        if (!$existed && is_dir($mp)) {
+            $chownOut = run_cmd("sudo -n /bin/chown nobody:nogroup $mpEsc");
+            if (preg_grep('/\(exit\s+[1-9]/', $chownOut)) {
+                $out = array_merge($out, ['chown failed: ' . implode(' | ', $chownOut)]);
+            }
+        }
         $remountOpts = 'remount,' . $remOptString;
         // build command using nsenter if available
         if ($nsenterAvailable) {

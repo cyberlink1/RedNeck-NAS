@@ -1462,7 +1462,7 @@ window.addEventListener('DOMContentLoaded', function() {
             if (dev) {
                 msg = 'Mount ' + dev + '?';
             }
-            msg += '\nThis will create or use /export/' + (sub ? sub : '<em>subdir</em>') + '.';
+            msg += '\nThis will create or use /export/' + (sub ? sub : '<em>subdir</em>') + '.\nNewly created directories are automatically chown\'ed to nobody:nogroup so they can be exported via NFS.';
             showConfirmation(msg, function() {
                 // ensure mount button name included and submit
                 if (!mountBtn.form.querySelector('input[name="mount_lv"]')) {

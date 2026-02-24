@@ -7,7 +7,7 @@ set -euo pipefail
 
 # remote destination; adjust user/host/target as needed
 REMOTE_USER="cl"
-REMOTE_HOST="192.168.10.151"
+REMOTE_HOST="192.168.10.153"
 REMOTE_DIR="/var/www/html"
 
 # source directory (this script's parent folder)

@@ -6,7 +6,7 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 
 - PHP 7.4+ with CLI/web support
 - Web server (Apache, Nginx) configured to serve this directory
-- `sudo` privileges (password‑less, since the code uses `sudo -n`) or root access for the PHP process to run `getent shadow` and the various LVM/RAID/NFS commands.  Make sure the sudoers entry includes `/bin/mkdir`, `/bin/mount` and `/bin/umount` as well, otherwise the Mounts page won’t be able to create the export directory or perform mounts.
+- `sudo` privileges (password‑less, since the code uses `sudo -n`) or root access for the PHP process to run `getent shadow` and the various LVM/RAID/NFS commands.  Make sure the sudoers entry includes `/bin/mkdir`, `/bin/mount`, `/bin/umount` **and `/bin/chown`**; when a new `/export/...` directory is created the backend will chown it to `nobody:nogroup` so that NFS can export the exported share before a filesystem is mounted there.
 - LVM utilities (`pvs`, `vgs`, `lvs`, `vgcreate`, `lvcreate` etc.)
 - `mdadm` for RAID creation
 - NFS utils (`exportfs`, provided by `nfs-kernel-server`/`nfs-common`)
@@ -25,7 +25,7 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
    ```
 www-data ALL=(ALL) NOPASSWD: \
     /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
-    /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/rmdir, \
+    /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/chown, /bin/rmdir, \
     /usr/sbin/exportfs, \
     /usr/sbin/parted, /usr/sbin/sgdisk, /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, \  # tee needed for adding fstab entries
     /usr/bin/pamtester, /usr/bin/python3, /usr/bin/perl, /bin/echo, \
