@@ -95,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // append via sudo tee so www-data doesn't need write permission
             $esc = escapeshellarg($line);
             run_cmd("echo $esc | sudo -n tee -a $exportsPath >/dev/null");
-            run_cmd('exportfs -ra');
+            run_cmd('sudo -n exportfs -ra');
             $message = 'Export added.';
         }
     } elseif (isset($_POST['edit_export'])) {
@@ -123,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $content = implode("\n", $new) . (count($new) ? "\n" : '');
             $cEsc = escapeshellarg($content);
             run_cmd("echo $cEsc | sudo -n tee $exportsPath >/dev/null");
-            run_cmd('exportfs -ra');
+            run_cmd('sudo -n exportfs -ra');
             $message = 'Export updated.';
         }
     } elseif (isset($_POST['remove_export'])) {
@@ -170,17 +170,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // rewrite using sudo tee (overwrite)
             $cEsc = escapeshellarg($content);
             run_cmd("echo $cEsc | sudo -n tee $exportsPath >/dev/null");
-            run_cmd('exportfs -ra');
+            run_cmd('sudo -n exportfs -ra');
             $message = 'Export removed.';
         } else {
-            // fallback to old behaviour (remove entire line)
+            // fallback to old behaviour (remove entire line). use sudo/tee instead of
+            // writing directly in case www-data can't open /etc/exports itself.
             $toRemove = trim($_POST['remove_export']);
             $lines = read_exports();
             $new = array_filter($lines, function($l) use ($toRemove) {
                 return trim($l) !== $toRemove;
             });
-            file_put_contents($exportsPath, implode("\n", $new) . "\n");
-            run_cmd('exportfs -ra');
+            $content = implode("\n", $new) . "\n";
+            $cEsc = escapeshellarg($content);
+            run_cmd("echo $cEsc | sudo -n tee $exportsPath >/dev/null");
+            run_cmd('sudo -n exportfs -ra');
             $message = 'Export removed.';
         }
     }
@@ -344,6 +347,8 @@ var exportClients = <?php echo json_encode($grouped, JSON_HEX_TAG|JSON_HEX_AMP);
       <form id="editExportForm" method="post">
             <input type="hidden" name="replace_dir" id="replace_dir">
             <input type="hidden" name="new_line" id="new_line">
+            <input type="hidden" name="remove_export" id="remove_export">
+            <input type="hidden" name="orig_line" id="orig_line">
             <div class="mb-3">
                 <label class="form-label">Comment</label>
                 <div id="editComment" class="form-control-plaintext"></div>
@@ -361,6 +366,7 @@ var exportClients = <?php echo json_encode($grouped, JSON_HEX_TAG|JSON_HEX_AMP);
             </div>
             <div class="text-end">
                 <button name="edit_export" type="submit" class="btn btn-primary">Save</button>
+                <button type="button" id="deleteExportBtn" class="btn btn-danger ms-2">Delete</button>
                 <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
             </div>
       </form>

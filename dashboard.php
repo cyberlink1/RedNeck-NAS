@@ -5,7 +5,9 @@ $user = $_SESSION['user'];
 
 // available view names map to files under views/
 $validViews = ['raid','lvm','mounts','nfs','disks'];
-$view = $_GET['view'] ?? '';
+// accept view name from either GET or POST so form submissions stay on the
+// same page rather than falling back to the default dashboard content.
+$view = $_REQUEST['view'] ?? '';
 if (!in_array($view, $validViews, true)) {
     $view = '';
 }
@@ -187,6 +189,9 @@ if ($view === '') {
         <?php else: ?>
             <?php include __DIR__ . "/views/{$view}.php"; ?>
         <?php endif; ?>
+    </div>
+    <div id="spinnerOverlay">
+        <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/app.js"></script>

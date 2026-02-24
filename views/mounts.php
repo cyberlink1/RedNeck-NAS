@@ -146,7 +146,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // message set, handled below
         }
     } elseif (isset($_POST['umount_lv'])) {
-        $mp = escapeshellarg($_POST['umount_select']);
+        $rawMp = trim($_POST['umount_select']);
+        $mp = escapeshellarg($rawMp);
         if ($nsenterAvailable) {
             $cmd = "sudo -n /usr/bin/nsenter -t 1 -m /bin/umount $mp";
         } else {
@@ -160,6 +161,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // if the entry vanished, treat it as success regardless of command exit code
         if (count($after) === 0) {
             $statusMsg = 'Unmount succeeded';
+            // also remove any fstab entry for this mount point so it won't come
+            // back on reboot.
+            $safe = preg_quote($rawMp, '/');
+            $pattern = "^[[:space:]]*\\S+\\s+{$safe}\\s";
+            $cmd = "sudo -n sh -c 'grep -v -E " . escapeshellarg($pattern) . " /etc/fstab > /tmp/fstab.$$ && mv /tmp/fstab.$$ /etc/fstab'";
+            run_cmd($cmd);
+            $statusMsg .= ' (fstab entry removed)';
         } elseif (preg_grep('/\(exit\s+[1-9]/', $out)) {
             $out[] = "command: $cmd";
             $statusMsg = 'Unmount failed';
@@ -472,6 +480,7 @@ if (count($mounts) === 0 && count($mnts) > 0) {
                 <td><?php echo htmlspecialchars($m['opts'] ?? ''); ?></td>
                 <td>
                     <form method="post" class="d-inline">
+                        <input type="hidden" name="view" value="mounts">
                         <input type="hidden" name="umount_select" value="<?php echo htmlspecialchars($m['pt']); ?>">
                         <button name="umount_lv" class="btn btn-sm btn-secondary btn-umount-row" type="submit">Unmount</button>
                     </form>
@@ -494,6 +503,7 @@ if (count($mounts) === 0 && count($mnts) > 0) {
       </div>
       <div class="modal-body">
         <form id="mountForm" method="post">
+            <input type="hidden" name="view" value="mounts">
             <div class="mb-3">
                 <label class="form-label">Device</label>
                 <select name="device_select_mount" class="form-select" required>
@@ -546,6 +556,7 @@ if (count($mounts) === 0 && count($mnts) > 0) {
       </div>
       <div class="modal-body">
         <form id="editMountForm" method="post">
+            <input type="hidden" name="view" value="mounts">
             <input type="hidden" name="device">
             <div class="mb-3">
                 <label class="form-label">Mount point</label>

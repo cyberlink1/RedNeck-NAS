@@ -734,6 +734,12 @@ document.addEventListener('DOMContentLoaded', function() {
 // we also ensure the disk field is sent and provide a warning if the
 // response is empty (a missing disk value is the usual culprit).
 function submitDiskFormAjax(form) {
+    // whenever we start an AJAX disk operation show the spinner overlay so
+    // users see that something is happening; the fetch below runs asynchronously
+    // so the overlay might disappear only when the response arrives and we
+    // refresh the modal contents.  hideSpinner() will be called once we get a
+    // response or an error so the screen isn’t blocked indefinitely.
+    showSpinner();
     console.log('submitDiskFormAjax invoked, form=', form, 'lastSubmitName=', form._lastSubmitName);
     var data = new FormData(form);
     // ensure disk field is always sent (some browsers drop empty hidden inputs)
@@ -748,6 +754,8 @@ function submitDiskFormAjax(form) {
     fetch('views/disks.php', { method: 'POST', body: data })
         .then(function(resp) { return resp.text(); })
         .then(function(newHtml) {
+            // hide spinner as soon as we begin processing response
+            hideSpinner();
             if (newHtml.trim() === '') {
                 // nothing returned – most likely the disk value was missing
                 showResult('Error: no response from server (disk may be unset)');
@@ -801,6 +809,7 @@ function submitDiskFormAjax(form) {
         })
         .catch(function(err) {
             console.error('modal form ajax error', err);
+            hideSpinner();
         });
 }
 
@@ -979,6 +988,7 @@ function attachDiskHandlers(root) {
                     act.value = '1';
                     f.appendChild(act);
                     document.body.appendChild(f);
+                    showSpinner();
                     f.submit();
                 });
             }
@@ -1701,6 +1711,23 @@ window.addEventListener('DOMContentLoaded', function() {
                 });
                 var hidden = document.getElementById('replace_dir');
                 if (hidden) hidden.value = dir;
+                // clear fields that might persist from previous use
+                var newLine = document.getElementById('new_line');
+                if (newLine) newLine.value = '';
+                var rem = document.getElementById('remove_export');
+                if (rem) rem.value = '';
+                // remember the original export line so delete can be accurate
+                var origInput = document.getElementById('orig_line');
+                if (origInput) {
+                    var clientsArr = [];
+                    info.clients.forEach(function(c){
+                        if (c.client) {
+                            if (c.opts) clientsArr.push(c.client + '(' + c.opts + ')');
+                            else clientsArr.push(c.client);
+                        }
+                    });
+                    origInput.value = dir + (clientsArr.length ? ' ' + clientsArr.join(' ') : '');
+                }
                 new bootstrap.Modal(modal).show();
             });
         });
@@ -1732,6 +1759,20 @@ window.addEventListener('DOMContentLoaded', function() {
             }
             editForm.new_line.value = dir + ' ' + clients.join(' ');
         });
+
+        // delete button behaviour ------------------------------------------------
+        var delBtn = document.getElementById('deleteExportBtn');
+        if (delBtn) {
+            delBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                var orig = editForm.orig_line.value.trim();
+                if (!orig) return;
+                showConfirmation('Delete this export entry? This will remove the entire export from /etc/exports.', function() {
+                    editForm.remove_export.value = orig;
+                    editForm.submit();
+                });
+            });
+        }
     }
 
     // unmount buttons in mounts table
@@ -1740,6 +1781,15 @@ window.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', function(e) {
             e.preventDefault();
             showConfirmation('Unmount this export?\nAny users accessing it will be disconnected.', function() {
+                // programmatic submit() does not include button name/value, so
+                // add a hidden field just as the mount code does.
+                if (!btn.form.querySelector('input[name="umount_lv"]')) {
+                    var hid = document.createElement('input');
+                    hid.type = 'hidden';
+                    hid.name = 'umount_lv';
+                    hid.value = btn.value || '1';
+                    btn.form.appendChild(hid);
+                }
                 btn.form.submit();
             });
         });
