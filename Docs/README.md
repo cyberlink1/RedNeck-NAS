@@ -101,10 +101,10 @@ You just need a straightforward web interface on top of Linux.
 Install Debian 13 (Trixie)
 
 During installation:
-    ❌ Uncheck Desktop Environment
-    ❌ Uncheck GNOME
-    ✅ Select Web Server
-    ✅ Select SSH Server
+   - ❌ Uncheck Desktop Environment
+   - ❌ Uncheck GNOME
+   - ✅ Select Web Server
+   - ✅ Select SSH Server
 
 Finish installation and reboot.
 
