@@ -1,5 +1,7 @@
 ## RNN (RedNeck NAS)
 
+![Dashboard](Screen%20Shots/Dashboard.png)
+
 RNN is a lightweight web control plane for Linux storage.
 
 It does not maintain its own configuration database.
