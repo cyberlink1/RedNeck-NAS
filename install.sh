@@ -57,6 +57,24 @@ else
 fi
 systemctl restart apache2
 
+# deploy web UI files to the document root
+WEBROOT=/var/www/html
+echo "deploying web files to ${WEBROOT}"
+# ensure the directory exists
+mkdir -p "$WEBROOT"
+# remove stock index that comes with a fresh apache install
+if [ -e "$WEBROOT/index.html" ]; then
+    echo "removing default index.html from ${WEBROOT}"
+    rm -f "$WEBROOT/index.html"
+fi
+# copy the contents of the current repository
+# assume install.sh is located at the top level of the web UI tree
+SRC_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cp -r "$SRC_DIR"/* "$WEBROOT/"
+# adjust ownership so apache can read/write if necessary
+chown -R www-data:www-data "$WEBROOT"
+
+
 cat <<'EOF'
 
 Installation complete.
