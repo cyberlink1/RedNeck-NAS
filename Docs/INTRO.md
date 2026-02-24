@@ -80,7 +80,8 @@ Sometimes you do not need a storage distribution.
 You just need a straightforward web interface on top of Linux.
 
 ## Quick Start
-Install Debian
+Install Debian 13 (Trixie)
+
 During installation:
     ❌ Uncheck Desktop Environment
     ❌ Uncheck GNOME
@@ -97,4 +98,4 @@ cd /home/(username where you uploaded repo)
 usermod -aG nfs youruser
 open browser to http://server-ip/
 
-The install.sh is less than 100 lines and designed to run on Debian 13 Trixie. Though the only changes that would need to be made to run on another distro is the package names and package managment install. 
+The install.sh is less than 100 lines and designed to run on Debian 13 Trixie. Though the only changes needed to run on another distro is the package names and package managment install. 
