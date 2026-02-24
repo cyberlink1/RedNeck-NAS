@@ -128,7 +128,16 @@ body {
     border-color: var(--header-green) !important;
     accent-color: var(--header-green) !important;
 }
-.dark-mode .form-control:focus,
+
+/* export comment input should be muted in dark mode */
+.dark-mode input[name="export_comment"].form-control {
+    color: var(--text-muted) !important;
+}
+
+/* plain‑text comment display inside edit modal */
+.dark-mode #editComment.form-control-plaintext {
+    color: var(--text-muted) !important;
+}.dark-mode .form-control:focus,
 .dark-mode .form-select:focus,
 .dark-mode textarea.form-control:focus {
     background-color: var(--header-green) !important;

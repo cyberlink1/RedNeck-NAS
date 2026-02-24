@@ -153,3 +153,15 @@ The logical‑volumes card will expand horizontally as needed to accommodate lon
 php -S localhost:8000 -t /path/to/this/project
 ```
 
+Dark mode color scheme
+  --bg-main: #0d0f0d;
+  --bg-panel: #161a16;
+  --border: #1f2a1f;
+  --text-main: #33ff33;
+  --text-muted: #1faa1f;
+  --danger: #ff4444;
+  --warning: #ffaa00;
+  --accent: #00ff88;
+  --terminal-green: #33ff33;
+  --header-green: #003300;
+  --header-border: #00aa00;
