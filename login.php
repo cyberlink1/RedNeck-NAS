@@ -25,6 +25,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <title>Login</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/style.css">
+    <script defer src="assets/js/app.js"></script>
+    <style>
+    /* ensure switch is visible in dark mode on login page */
+    .dark-mode #darkModeToggle {
+        border-color: #000;
+    }
+    </style>
 </head>
 <body class="bg-light">
     <div class="container">
@@ -32,7 +39,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="col-md-4">
                 <div class="card mt-5">
                     <div class="card-body">
-                        <h3 class="card-title text-center">System Login</h3>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h3 class="card-title mb-0">System Login</h3>
+                            <div class="form-check form-switch m-0">
+                                <input class="form-check-input" type="checkbox" id="darkModeToggle">
+                                <label class="form-check-label" for="darkModeToggle"></label>
+                            </div>
+                        </div>
                         <?php if ($err): ?>
                             <div class="alert alert-danger"><?php echo htmlspecialchars($err); ?></div>
                         <?php endif; ?>

@@ -29,6 +29,40 @@ document.addEventListener('submit', function(e) {
 // if a modal loses its options after an AJAX refresh of the info modal.
 var cachedFsTypes = [];
 document.addEventListener('DOMContentLoaded', function() {
+    /* dark mode switch: checkbox styled as a Bootstrap form-switch */
+    var darkToggle = document.getElementById('darkModeToggle');
+    function swapBgClasses(enable) {
+        // when dark mode is active we want <body> to carry the custom
+        // bg-main class (not Bootstrap's bg-dark).  clear any light/dark
+        // utility classes so the custom colour can take effect.
+        if (enable) {
+            document.body.classList.remove('bg-light', 'bg-dark');
+            document.body.classList.add('bg-main');
+        } else {
+            document.body.classList.remove('bg-main', 'bg-dark');
+            document.body.classList.add('bg-light');
+        }
+    }
+
+    function applyStoredDarkMode() {
+        var val = localStorage.getItem('darkMode');
+        var enabled = val === '1';
+        if (enabled) document.body.classList.add('dark-mode');
+        else document.body.classList.remove('dark-mode');
+        swapBgClasses(enabled);
+        if (darkToggle) darkToggle.checked = enabled;
+    }
+    if (darkToggle) {
+        darkToggle.addEventListener('change', function() {
+            var enabled = !!darkToggle.checked;
+            if (enabled) document.body.classList.add('dark-mode');
+            else document.body.classList.remove('dark-mode');
+            swapBgClasses(enabled);
+            localStorage.setItem('darkMode', enabled ? '1' : '0');
+        });
+    }
+    applyStoredDarkMode();
+
     var fsel = document.querySelector('select[name="fstype"]');
     if (fsel) {
         cachedFsTypes = [].slice.call(fsel.options)

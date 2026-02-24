@@ -138,7 +138,11 @@ if ($view === '') {
                     <li class="nav-item"><a class="nav-link <?php if ($view==='nfs') echo 'active'; ?>" href="dashboard.php?view=nfs">NFS Exports</a></li>
                 </ul>
                 <span class="navbar-text me-2">Logged in as <?php echo htmlspecialchars($user); ?></span>
-                <a class="btn btn-outline-light" href="logout.php">Logout</a>
+                <div class="form-check form-switch ms-2 mb-0">
+                    <input class="form-check-input" type="checkbox" id="darkModeToggle">
+                    <label class="form-check-label" for="darkModeToggle"></label>
+                </div>
+                <a class="btn btn-outline-light ms-2" href="logout.php">Logout</a>
             </div>
         </div>
     </nav>
@@ -192,6 +196,10 @@ if ($view === '') {
     </div>
     <div id="spinnerOverlay">
         <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
+    </div>
+    <div class="carrier-msg">
+        +++<br>
+        NO CARRIER
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/app.js"></script>
