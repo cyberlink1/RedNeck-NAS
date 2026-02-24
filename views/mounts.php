@@ -106,7 +106,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($statusMsg)) {
             $statusMsg = "[device $dev -> $mp] $statusMsg";
         }
-        if (isset($statusMsg) && strpos($statusMsg,'Mount succeeded') === 0) {
+        // the prefix above means the message no longer *starts* with
+        // "Mount succeeded"; use strpos!==false so we still catch a success.
+        if (isset($statusMsg) && strpos($statusMsg,'Mount succeeded') !== false) {
             // optionally add to fstab if user requested
             if (!empty($_POST['mount_boot'])) {
                 // attempt to detect filesystem type
@@ -147,38 +149,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif (isset($_POST['umount_lv'])) {
         $rawMp = trim($_POST['umount_select']);
-        $mp = escapeshellarg($rawMp);
+        $mpEsc = escapeshellarg($rawMp);
         if ($nsenterAvailable) {
-            $cmd = "sudo -n /usr/bin/nsenter -t 1 -m /bin/umount $mp";
+            $cmd = "sudo -n /usr/bin/nsenter -t 1 -m /bin/umount $mpEsc";
         } else {
-            $cmd = "sudo -n /bin/umount $mp";
+            $cmd = "sudo -n /bin/umount $mpEsc";
         }
         $out = run_cmd($cmd);
-        // check mount table afterward to see if it really disappeared; strip
-        // out the sole "(exit N)" line that grep prints when there’s no match.
-        $after = run_cmd(nsCmd("mount | grep " . escapeshellarg($mp)));
-        $after = array_values(array_filter($after, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
-        // if the entry vanished, treat it as success regardless of command exit code
-        if (count($after) === 0) {
-            $statusMsg = 'Unmount succeeded';
-            // also remove any fstab entry for this mount point so it won't come
-            // back on reboot.
-            $safe = preg_quote($rawMp, '/');
-            $pattern = "^[[:space:]]*\\S+\\s+{$safe}\\s";
-            $cmd = "sudo -n sh -c 'grep -v -E " . escapeshellarg($pattern) . " /etc/fstab > /tmp/fstab.$$ && mv /tmp/fstab.$$ /etc/fstab'";
-            run_cmd($cmd);
-            $statusMsg .= ' (fstab entry removed)';
-        } elseif (preg_grep('/\(exit\s+[1-9]/', $out)) {
-            $out[] = "command: $cmd";
-            $statusMsg = 'Unmount failed';
-            $out = array_merge($out, $after);
-        } else {
-            $statusMsg = 'Unmount claimed success but entry still present';
-            $out = array_merge($out, $after);
+        // check whether an fstab entry exists by grepping the second field
+        $haveEntry = false;
+        $grepOut = run_cmd("grep -F ' " . escapeshellarg($rawMp) . " ' /etc/fstab");
+        foreach ($grepOut as $line) {
+            if (strpos($line, '(exit') === false) {
+                $haveEntry = true;
+                break;
+            }
         }
-        // include mount point in message for clarity
+        // perform removal using awk which tests the second column exactly;
+        // this will always rewrite the file but leave it unchanged if no match
+        // exists. using awk avoids quoting headaches with grep regex.
+        // perform safe removal purely in PHP to avoid shell quoting headaches
+        // read the current fstab and filter out any line whose second field matches
+        $lines = @file('/etc/fstab', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+        $filtered = [];
+        foreach ($lines as $l) {
+            // skip comment lines entirely (allow leading whitespace before '#')
+            if (preg_match('/^\s*#/', $l)) {
+                $filtered[] = $l;
+                continue;
+            }
+            // if the second field equals the mountpoint, drop the line; we use a
+            // regex to avoid problems with leading spaces producing an empty
+            // first element when preg_split is used.
+            if (preg_match('/^\s*\S+\s+' . preg_quote($rawMp, '/') . '(\s|$)/', $l)) {
+                continue;
+            }
+            $filtered[] = $l;
+        }
+        // write filtered result to temp file under /etc using sudo tee,
+        // then move into place. mv is now allowed in sudoers so this should
+        // succeed reliably and we avoid needing /bin/sh.
+        $tmpfh = popen('sudo -n tee /etc/fstab.tmp 2>&1', 'w');
+        if ($tmpfh === false) {
+            $out[] = "ERROR: failed to popen tee";
+        } else {
+            foreach ($filtered as $l) {
+                fwrite($tmpfh, $l . "\n");
+            }
+            $status = pclose($tmpfh);
+            $out[] = "tee exit status: $status";
+        }
+        $mvout = run_cmd('sudo -n mv /etc/fstab.tmp /etc/fstab');
+        foreach ($mvout as $l) { $out[] = "mv> $l"; }
+        // examine unmount result for status
+        $failed = preg_grep('/\(exit\s+[1-9]/', $out);
+        if (!$failed) {
+            $statusMsg = 'Unmount succeeded';
+            if ($haveEntry) {
+                $statusMsg .= ' (fstab entry removed)';
+            }
+        } else {
+            // even on failure include mount-table snippet for diagnostics
+            $after = run_cmd(nsCmd("mount | grep " . escapeshellarg($rawMp)));
+            $after = array_values(array_filter($after, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
+            if ($failed) {
+                $out[] = "command: $cmd";
+                $statusMsg = 'Unmount failed';
+                $out = array_merge($out, $after);
+            } else {
+                $statusMsg = 'Unmount claimed success but entry still present';
+                $out = array_merge($out, $after);
+            }
+        }
+        // include mount point in message for clarity; use unescaped path
         if (isset($statusMsg)) {
-            $statusMsg = "[pt $mp] " . $statusMsg;
+            $statusMsg = "[pt $rawMp] " . $statusMsg;
         }
         if (strpos($statusMsg, 'Unmount succeeded') === 0) {
             // successful unmount, ignore any prior output

@@ -45,7 +45,7 @@ www-data ALL=(ALL) NOPASSWD: \
     /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, \
     /bin/mkdir, /bin/rmdir, /bin/chown, /usr/sbin/parted, /usr/sbin/sgdisk, \
     /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, /usr/bin/pamtester, \
-    /usr/bin/python3, /usr/bin/perl, /bin/echo, /bin/cat, /bin/grep
+    /usr/bin/python3, /usr/bin/perl, /bin/echo, /bin/cat, /bin/grep, /bin/mv
 
 # allow lookups with arguments
 www-data ALL=(ALL) NOPASSWD: /usr/bin/getent shadow *

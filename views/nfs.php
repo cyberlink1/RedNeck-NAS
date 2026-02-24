@@ -139,8 +139,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($lines as $line) {
                 $orig = $line;
                 $ltrim = trim($line);
-                if ($ltrim === '' || strpos(ltrim($ltrim), '#') === 0) {
-                    // preserve comments/blank lines
+                if ($ltrim === '') {
+                    $new[] = $orig;
+                    continue;
+                }
+                if (strpos($ltrim, '#') === 0) {
+                    // comment line, just keep it for now
                     $new[] = $orig;
                     continue;
                 }
@@ -153,7 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $new[] = $orig;
                     continue;
                 }
-                // remove matching spec
+                // same directory: remove the single client spec
                 $remaining = [];
                 foreach ($parts as $p) {
                     if ($p === $spec) {
@@ -162,9 +166,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $remaining[] = $p;
                 }
                 if (count($remaining) > 0) {
+                    // keep the line with remaining clients
                     $new[] = $thisdir . ' ' . implode(' ', $remaining);
+                } else {
+                    // dropped the entire export line; also drop preceding comment if any
+                    if (!empty($new)) {
+                        $last = end($new);
+                        if (trim($last) !== '' && strpos(trim($last), '#') === 0) {
+                            array_pop($new);
+                        }
+                    }
                 }
-                // if no remaining clients, drop whole line
             }
             $content = implode("\n", $new) . (count($new) ? "\n" : '');
             // rewrite using sudo tee (overwrite)
@@ -177,9 +189,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // writing directly in case www-data can't open /etc/exports itself.
             $toRemove = trim($_POST['remove_export']);
             $lines = read_exports();
-            $new = array_filter($lines, function($l) use ($toRemove) {
-                return trim($l) !== $toRemove;
-            });
+            $new = [];
+            foreach ($lines as $line) {
+                $trim = trim($line);
+                if ($trim === '') {
+                    $new[] = $line;
+                    continue;
+                }
+                if (strpos($trim, '#') === 0) {
+                    // keep comments for now
+                    $new[] = $line;
+                    continue;
+                }
+                if ($trim === $toRemove) {
+                    // drop this export line and any comment immediately before it
+                    if (!empty($new)) {
+                        $last = end($new);
+                        if (trim($last) !== '' && strpos(trim($last), '#') === 0) {
+                            array_pop($new);
+                        }
+                    }
+                    continue;
+                }
+                $new[] = $line;
+            }
             $content = implode("\n", $new) . "\n";
             $cEsc = escapeshellarg($content);
             run_cmd("echo $cEsc | sudo -n tee $exportsPath >/dev/null");

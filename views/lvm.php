@@ -231,9 +231,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message = implode("<br>", $out);
         $showLvAfter = true;
     } elseif (isset($_POST['remove_lv'])) {
-        $lv = escapeshellarg(trim($_POST['lv_select'] ?? ''));
-        $out = run_cmd("sudo lvremove -fy $lv");
-        $message = implode("<br>", $out);
+        // always process lvs[]; ignore lv_select which may be disabled
+        $sel = $_POST['lvs'] ?? [];
+        if (!is_array($sel)) {
+            $sel = [];
+        }
+        $outs = [];
+        foreach ($sel as $lvpath) {
+            $lvpath = trim($lvpath);
+            if ($lvpath === '') continue;
+            $lv = escapeshellarg($lvpath);
+            $res = run_cmd("sudo lvremove -fy $lv");
+            $outs[] = implode("<br>", $res);
+        }
+        if (count($outs) === 0) {
+            $message = 'No logical volumes selected for removal.';
+        } else {
+            $message = implode("<br>---<br>", $outs);
+        }
         $showLvAfter = true;
     } elseif (isset($_POST['format_lv'])) {
         $sel = $_POST['lvs'] ?? [];
@@ -722,6 +737,7 @@ sort($fsTypes);
                     <?php } ?>
                 </select>
             </div>
+            <div id="removeLvList" class="mb-3"></div>
             <div class="text-end">
                 <button name="remove_lv" class="btn btn-danger">Remove LV</button>
                 <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>

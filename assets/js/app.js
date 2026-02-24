@@ -152,11 +152,66 @@ document.addEventListener('DOMContentLoaded', function() {
     var openRemoveLv = document.getElementById('btnOpenRemoveLv');
     if (openRemoveLv) {
         openRemoveLv.addEventListener('click', function() {
-            var checked = document.querySelector('#lvModal tbody input.lv-checkbox:checked');
-            if (checked) {
-                var sel = document.querySelector('#removeLvForm select[name="lv_select"]');
-                if (sel) sel.value = checked.value;
+            var selected = Array.from(document.querySelectorAll('#lvModal tbody input.lv-checkbox:checked')).map(function(cb){return cb.value;});
+            if (selected.length === 0) {
+                showConfirmation('Please select at least one logical volume to remove.');
+                return;
             }
+            var form = document.getElementById('removeLvForm');
+            // adjust modal title for plural
+            var modal = document.getElementById('removeLvModal');
+            if (modal) {
+                var title = modal.querySelector('.modal-title');
+                if (title) {
+                    title.textContent = selected.length > 1 ? 'Remove Logical Volumes' : 'Remove Logical Volume';
+                }
+            }
+            var sel = form.querySelector('select[name="lv_select"]');
+            var listContainer = form.querySelector('#removeLvList');
+            // reset state from previous use
+            if (listContainer) listContainer.innerHTML = '';
+            if (sel) {
+                sel.value = '';
+                sel.closest('.mb-3').style.display = '';
+                sel.required = true;
+                sel.disabled = false;
+            }
+            // remove any existing hidden lvs[] inputs
+            form.querySelectorAll('input[name="lvs[]"]').forEach(function(i){ i.remove(); });
+
+            // always create hidden inputs for every selected LV, even if only one
+            selected.forEach(function(lv){
+                var hid = document.createElement('input');
+                hid.type = 'hidden'; hid.name = 'lvs[]'; hid.value = lv;
+                form.appendChild(hid);
+            });
+            if (selected.length === 1) {
+                // single choice, keep dropdown for clarity and set its value
+                if (sel) {
+                    sel.value = selected[0];
+                    sel.required = true;
+                    sel.disabled = false;
+                }
+            } else {
+                // multiple: hide dropdown and show list of volumes
+                if (sel) {
+                    sel.closest('.mb-3').style.display = 'none';
+                    sel.required = false;
+                    sel.disabled = true;
+                }
+                if (listContainer) {
+                    var label = document.createElement('label');
+                    label.className = 'form-label';
+                    label.textContent = 'Volumes to remove';
+                    listContainer.appendChild(label);
+                    selected.forEach(function(lv){
+                        var div = document.createElement('div');
+                        div.textContent = lv;
+                        listContainer.appendChild(div);
+                    });
+                }
+            }
+
             var lvModal = document.getElementById('lvModal');
             var inst = bootstrap.Modal.getInstance(lvModal);
             if (inst) inst.hide();
@@ -243,7 +298,16 @@ document.addEventListener('DOMContentLoaded', function() {
     if (removeLvForm) {
         removeLvForm.addEventListener('submit', function(e) {
             e.preventDefault();
-            showConfirmation('Remove the selected logical volume? This is irreversible.', function() {
+            // determine how many volumes will be removed for better wording
+            var count = removeLvForm.querySelectorAll('input[name="lvs[]"]').length;
+            if (count === 0) {
+                var sel = removeLvForm.querySelector('select[name="lv_select"]');
+                if (sel && sel.value) count = 1;
+            }
+            var msg = count > 1
+                    ? 'Remove the ' + count + ' selected logical volumes? This is irreversible.'
+                    : 'Remove the selected logical volume? This is irreversible.';
+            showConfirmation(msg, function() {
                 var inp = document.createElement('input');
                 inp.type = 'hidden';
                 inp.name = 'remove_lv';
@@ -1821,7 +1885,7 @@ document.addEventListener('hidden.bs.modal', function() {
 // disk table row info/selection (run regardless of DOMContentLoaded state)
 (function() {
     var diskTable = document.getElementById('diskTable');
-    console.log('diskTable element', diskTable);
+    // no need to spam console when missing (only present on disks view)
     if (diskTable) {
         diskTable.querySelectorAll('tbody tr').forEach(function(row) {
             row.addEventListener('click', function() {
