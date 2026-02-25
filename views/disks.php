@@ -365,9 +365,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($dev === '') {
             $message = 'No disk selected.';
         } else {
+            // wiping a disk that previously belonged to an MD array often
+            // leaves behind inconsistent GPT headers; sgdisk will complain
+            // loudly and exit with status 2 even though the metadata has
+            // been zapped.  To avoid alarming the user we filter out the
+            // typical "Caution:"/"Warning!" lines and always proceed with
+            // wipefs afterward.
             $out = run_cmd('sudo sgdisk --zap-all ' . escapeshellarg($dev));
+            // discard non‑fatal warnings emitted by sgdisk
+            $filtered = [];
+            foreach ($out as $line) {
+                if (preg_match('/^(Caution:|Warning!|Invalid partition data|GPT data structures destroyed)/i', trim($line))) {
+                    continue;
+                }
+                $filtered[] = $line;
+            }
+            $out = $filtered;
             $out = array_merge($out, run_cmd('sudo wipefs -a ' . escapeshellarg($dev)));
-            $message = implode("<br>", $out);
+            // if sgdisk returned a non-zero status it may have appended a
+            // "(exit N)" line; leave that in place so admins can still see
+            // the exit code if they open the raw message.
+            if (empty($out)) {
+                $message = 'Disk wiped successfully.';
+            } else {
+                $message = implode("<br>", $out);
+            }
         }
         $selected = $dev;
     } elseif (isset($_POST['smart_status'])) {
