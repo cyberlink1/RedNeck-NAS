@@ -147,14 +147,31 @@ function authenticate(string $user, string $password): bool
 
 function require_login()
 {
+    // decide whether this is an AJAX/JSON request; many of our
+    // client-side calls include an "ajax=1" parameter but we also
+    // accept XMLHttpRequest headers for future compatibility.
+    $isAjax = !empty($_REQUEST['ajax'])
+           || !empty($_REQUEST['json'])
+           || (isset($_SERVER['HTTP_X_REQUESTED_WITH'])
+               && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
+
     if (empty($_SESSION['user'])) {
-        header('Location: login.php');
+        if ($isAjax) {
+            // caller will handle redirect client-side
+            header('HTTP/1.1 401 Unauthorized');
+        } else {
+            header('Location: login.php');
+        }
         exit;
     }
     // if membership was revoked while session active, treat as logged out
     if (!user_in_group($_SESSION['user'], 'nfs')) {
         session_destroy();
-        header('Location: login.php');
+        if ($isAjax) {
+            header('HTTP/1.1 401 Unauthorized');
+        } else {
+            header('Location: login.php');
+        }
         exit;
     }
 }

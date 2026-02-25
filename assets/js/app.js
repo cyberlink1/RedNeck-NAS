@@ -502,7 +502,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var tableBody = document.getElementById('snapListBody');
         if (!tableBody) return;
         tableBody.innerHTML = '';
-        return fetch('dashboard.php?view=lvm&ajax=list_snaps&lv=' + encodeURIComponent(lv))
+        return fetchAuth('dashboard.php?view=lvm&ajax=list_snaps&lv=' + encodeURIComponent(lv))
             .then(r => r.text())
             .then(txt => {
                 // quick sanity check: if the response looks like a full HTML page,
@@ -849,7 +849,7 @@ function submitDiskFormAjax(form) {
         data.append(form._lastSubmitName, form._lastSubmitValue);
     }
     data.append('ajax', '1');
-    fetch('views/disks.php', { method: 'POST', body: data })
+    fetchAuth('views/disks.php', { method: 'POST', body: data })
         .then(function(resp) { return resp.text(); })
         .then(function(newHtml) {
             // hide spinner as soon as we begin processing response
@@ -927,7 +927,7 @@ function openAddRaidModal(raidDev, isSpare) {
     }
     var select = modal.querySelector('select[name="new_disk"]');
     select.innerHTML = '<option value="">(loading…)</option>';
-    fetch('views/raid.php?json_unused=1')
+    fetchAuth('views/raid.php?json_unused=1')
         .then(function(r){ return r.json(); })
         .then(function(list){
             select.innerHTML = '';
@@ -959,7 +959,7 @@ function openFailRaidModal(raidDev) {
     }
     var select = modal.querySelector('select[name="member"]');
     select.innerHTML = '<option value="">(loading…)</option>';
-    fetch('views/raid.php?json_members=1&raid=' + encodeURIComponent(raidDev))
+    fetchAuth('views/raid.php?json_members=1&raid=' + encodeURIComponent(raidDev))
         .then(function(r){ return r.json(); })
         .then(function(list){
             select.innerHTML = '';
@@ -1045,7 +1045,7 @@ function attachDiskHandlers(root) {
             console.log('raid action click', action, raidDev);
             if (action === 'partitionraid') {
                 // immediately switch to disk view without extra confirmation
-                fetch('views/disks.php?ajax=1&raid=1&disk=' + encodeURIComponent(raidDev))
+                fetchAuth('views/disks.php?ajax=1&raid=1&disk=' + encodeURIComponent(raidDev))
                     .then(function(resp){ return resp.text(); })
                     .then(function(html){ showInfo(html); })
                     .catch(function(err){ console.error('raid->disk AJAX error', err); });
@@ -1119,7 +1119,7 @@ function showInfo(html) {
             e.preventDefault();
             var dev = link.dataset.dev || '';
             if (dev) {
-                fetch('views/disks.php?ajax=1&raid=1&disk=' + encodeURIComponent(dev))
+                fetchAuth('views/disks.php?ajax=1&raid=1&disk=' + encodeURIComponent(dev))
                     .then(function(resp){ return resp.text(); })
                     .then(function(html){ showInfo(html); })
                     .catch(function(err){ console.error('member AJAX error', err); });
@@ -1227,7 +1227,7 @@ function openSubmodal(subId, disk) {
             var sel = sub.querySelector('select[name="part_num"]');
             if (sel) {
                 sel.innerHTML = '<option value="">Loading…</option>';
-                fetch('views/disks.php?list_parts=1&disk=' + encodeURIComponent(disk))
+                fetchAuth('views/disks.php?list_parts=1&disk=' + encodeURIComponent(disk))
                     .then(function(r){ return r.json(); })
                     .then(function(list){
                         sel.innerHTML = '';
@@ -1939,7 +1939,7 @@ document.addEventListener('hidden.bs.modal', function() {
                 var dev = row.dataset.dev || '';
                 console.log('disk row clicked', dev);
                 // request card HTML via AJAX
-                fetch('views/disks.php?ajax=1&disk=' + encodeURIComponent(dev))
+                fetchAuth('views/disks.php?ajax=1&disk=' + encodeURIComponent(dev))
                     .then(function(resp) { return resp.text(); })
                     .then(function(html) {
                         showInfo(html);
@@ -1959,7 +1959,7 @@ document.addEventListener('hidden.bs.modal', function() {
         raidTable.querySelectorAll('tbody tr').forEach(function(row) {
             row.addEventListener('click', function() {
                 var dev = row.dataset.dev || '';
-                fetch('views/raid.php?ajax=1&raid=' + encodeURIComponent(dev))
+                fetchAuth('views/raid.php?ajax=1&raid=' + encodeURIComponent(dev))
                     .then(function(resp) { return resp.text(); })
                     .then(function(html) { showInfo(html); })
                     .catch(function(err) { console.error('raid AJAX error', err); });
