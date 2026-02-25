@@ -25,6 +25,19 @@ document.addEventListener('submit', function(e) {
     }, 0);
 });
 
+// wrap fetch calls and handle authentication failures
+function fetchAuth(input, init) {
+    return fetch(input, init).then(function(resp) {
+        if (resp.status === 401) {
+            // session expired – redirect to login page so the user can re‑auth.
+            // the 401 status is returned by require_login() for AJAX requests.
+            window.location = 'login.php';
+            return Promise.reject(new Error('unauthorized'));
+        }
+        return resp;
+    });
+}
+
 // cache of filesystem types read from the initial page; used as a fallback
 // if a modal loses its options after an AJAX refresh of the info modal.
 var cachedFsTypes = [];
