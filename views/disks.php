@@ -375,15 +375,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($dev === '') {
             $message = 'No disk selected.';
         } else {
-            $out = run_cmd('sudo smartctl -H ' . escapeshellarg($dev));
-            // append temperature line if present in attributes
-            $attr = run_cmd('sudo smartctl -A ' . escapeshellarg($dev));
-            foreach ($attr as $line) {
-                if (preg_match('/Temperature/i', $line)) {
-                    $out[] = $line;
+            // use -a to get the full SMART report instead of just health
+            $out = run_cmd('sudo smartctl -a ' . escapeshellarg($dev));
+            // strip any standalone "(exit N)" lines; run_cmd appends these to
+            // indicate the child’s exit status but they aren’t useful in the
+            // modal and clutter the output.
+            foreach ($out as $i => $line) {
+                if (preg_match('/^\(exit \d+\)$/', trim($line))) {
+                    unset($out[$i]);
                 }
             }
-            $message = implode("<br>", $out);
+            // render as a preformatted block and escape HTML characters so
+            // any angle brackets in the smartctl output aren’t treated as
+            // markup by the modal (the JS simply does innerHTML).
+            $message = '<pre>' . htmlspecialchars(implode("\n", $out)) . '</pre>';
         }
         $selected = $dev;
     } elseif (isset($_POST['identify'])) {
@@ -597,11 +602,13 @@ if ($selected) {
         <?php endif; ?>
         <form method="post" style="display:inline" class="ms-2">
             <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-            <button name="smart_status" class="btn btn-secondary">SMART status</button>
+            <!-- explicit type ensures JS sees this as a submit button when
+                 collecting the last-clicked button name/value -->
+            <button type="submit" name="smart_status" class="btn btn-secondary">SMART status</button>
         </form>
         <form method="post" style="display:inline" class="ms-2">
             <input type="hidden" name="disk" value="<?php echo htmlspecialchars($selected); ?>">
-            <button name="identify" class="btn btn-info">Identify (LED)</button>
+            <button type="submit" name="identify" class="btn btn-info">Identify (LED)</button>
         </form>
     </div>
     <?php
@@ -678,6 +685,7 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
                                     <th>Size</th>
                                     <th>Used by</th>
                                     <th>Status</th>
+                                    <th>SMART</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -702,6 +710,19 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
                                 }
                                 $statusStr = $status ? implode('; ', $status) : '';
                                 $rowClass = ($dev === $selected) ? 'table-active' : '';
+                                // determine SMART health by querying smartctl -H; only captions
+                                // matter so we look for the overall-health line and strip label.
+                                $smartHealth = '';
+                                $scOut = run_cmd('sudo smartctl -H ' . escapeshellarg($dev));
+                                foreach ($scOut as $ln) {
+                                    // smartctl output varies by version/device; capture
+                                    // either the familiar "overall-health" line or the
+                                    // newer "SMART Health Status:" format.
+                                    if (preg_match('/SMART(?: overall-health self-assessment test result| Health Status):/i', $ln)) {
+                                        $smartHealth = trim(preg_replace('/^.*?:\s*/','', $ln));
+                                        break;
+                                    }
+                                }
                             ?>
                                 <?php
                                 // compute "used by" info: list md arrays or VG owning PV
@@ -729,12 +750,13 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
                                     $usedBy .= 'Partition';
                                 }
                             ?>
-                            <tr class="<?php echo $rowClass; ?>" data-dev="<?php echo htmlspecialchars($dev); ?>" data-name="<?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?>" data-size="<?php echo htmlspecialchars($size); ?>" data-status="<?php echo htmlspecialchars($statusStr); ?>" data-usedby="<?php echo htmlspecialchars($usedBy); ?>">
+                            <tr class="<?php echo $rowClass; ?>" data-dev="<?php echo htmlspecialchars($dev); ?>" data-name="<?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?>" data-size="<?php echo htmlspecialchars($size); ?>" data-status="<?php echo htmlspecialchars($statusStr); ?>" data-usedby="<?php echo htmlspecialchars($usedBy); ?>" data-smart="<?php echo htmlspecialchars($smartHealth); ?>">
                                     <td><?php echo htmlspecialchars($dev); ?></td>
                                     <td><?php echo htmlspecialchars(trim($model . ' ' . $serial)); ?></td>
                                     <td><?php echo htmlspecialchars($size); ?></td>
                                     <td><?php echo htmlspecialchars($usedBy); ?></td>
                                     <td><?php echo htmlspecialchars($statusStr); ?></td>
+                                    <td><?php echo htmlspecialchars($smartHealth); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                             </tbody>

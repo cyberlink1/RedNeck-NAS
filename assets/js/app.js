@@ -873,7 +873,11 @@ function submitDiskFormAjax(form) {
             // capture any bootstrap info alert text
             var alertElt = temp.querySelector('.alert.alert-info');
             if (alertElt) {
-                genericMsg = alertElt.textContent.trim();
+                // use innerHTML so any <pre> or other markup is preserved when
+                // we later inject the message via showResult().  Previously we
+                // used textContent which stripped newlines and collapsed the
+                // SMART output into a single line.
+                genericMsg = alertElt.innerHTML.trim();
                 alertElt.remove();
             }
             var res = temp.querySelector('#formatResult');
@@ -1147,11 +1151,20 @@ function showInfo(html) {
         // included (FormData doesn’t automatically include the button unless
         // it’s passed to the constructor).  this fixes the “create partition”
         // action not being seen on AJAX submits.
-        form.querySelectorAll('button[type=submit]').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                form._lastSubmitName = btn.name;
-                form._lastSubmitValue = btn.value || '';
-            });
+        // record the name/value of whichever submit button was clicked
+        // (some buttons omit the type attribute; browsers default them to
+        // "submit" so check the property rather than the attribute selector).
+        form.querySelectorAll('button').forEach(function(btn) {
+            try {
+                if (btn.type && btn.type.toLowerCase() === 'submit') {
+                    btn.addEventListener('click', function() {
+                        form._lastSubmitName = btn.name;
+                        form._lastSubmitValue = btn.value || '';
+                    });
+                }
+            } catch (e) {
+                // in case btn.type is inaccessible for some reason just skip
+            }
         });
 
         form.addEventListener('submit', function(e) {
