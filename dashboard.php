@@ -50,6 +50,18 @@ $exports = [];
 if ($view === '') {
     // existing LV and mount listing
     $lvs = run_cmd('sudo lvs --noheadings -o lv_path,vg_name,lv_size');
+    // lvs outputs a summary line ("Total") on some systems; only count
+    // actual logical volumes which have a /dev path.
+    $filteredLvs = [];
+    foreach ($lvs as $line) {
+        $line = trim($line);
+        if ($line === '') continue;
+        $parts = preg_split('/\s+/', $line);
+        if (isset($parts[0]) && strpos($parts[0], '/dev/') === 0) {
+            $filteredLvs[] = $line;
+        }
+    }
+    $lvs = $filteredLvs;
     // determine mounts under /export or /exports by inspecting the host mount
     // table. fallback to nsenter+grep if /proc/1/mounts isn't readable.
     $mnts = [];
