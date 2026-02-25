@@ -92,10 +92,12 @@ if ($view === '') {
         }
     }
 
-    // count RAID arrays by listing /dev/md*
+    // count RAID arrays by listing /dev/md*; ignore any partition nodes
     $mds = run_cmd('ls -1 /dev/md* 2>/dev/null');
     foreach ($mds as $line) {
-        if (preg_match('#^/dev/md#', trim($line))) {
+        $dev = trim($line);
+        // only count top‑level /dev/mdN entries (no trailing "p" or digits)
+        if (preg_match('#^/dev/md\d+$#', $dev)) {
             $raidCount++;
         }
     }
