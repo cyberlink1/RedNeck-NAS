@@ -380,7 +380,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $members[] = $m[1];
                     }
                 }
-                $out = run_cmd("sudo mdadm --stop " . escapeshellarg($raidPath));
+                // wipe any filesystem signatures on the array itself before
+                // stopping it.  This prevents leftover mkfs signatures from
+                // causing the device to be considered "formatted" later and
+                // mirrors the behaviour of disk wiping elsewhere in the UI.
+                $out = run_cmd("sudo wipefs -a " . escapeshellarg($raidPath));
+                // ensure array is stopped and then removed
+                $out = array_merge($out, run_cmd("sudo mdadm --stop " . escapeshellarg($raidPath)));
                 if (file_exists($raidPath)) {
                     $out = array_merge($out, run_cmd("sudo mdadm --remove " . escapeshellarg($raidPath)));
                 }
