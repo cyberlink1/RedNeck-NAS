@@ -45,7 +45,7 @@ www-data ALL=(ALL) NOPASSWD: \
     /sbin/pvcreate, /sbin/pvremove, /sbin/pvs, /sbin/vgs, /sbin/lvs, \
     /sbin/exportfs, /usr/sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, \
     /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, \
-    /bin/mkdir, /bin/rmdir, /bin/chown, /usr/sbin/parted, /usr/sbin/sgdisk, \
+    /bin/mkdir, /bin/rmdir, /bin/chown, /bin/chmod, /usr/sbin/parted, /usr/sbin/sgdisk, \
     /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, /usr/bin/pamtester, \
     /usr/bin/python3, /usr/bin/perl, /bin/echo, /bin/cat, /bin/grep, \
     /bin/mv, /bin/systemctl*

@@ -42,15 +42,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 // permissions bits
                 var perms = row.dataset.perms || '';
                 var p = parseInt(perms, 8) || 0;
-                form.perm_own_r.checked = !!(p & 0400);
-                form.perm_own_w.checked = !!(p & 0200);
-                form.perm_own_x.checked = !!(p & 0100);
-                form.perm_grp_r.checked = !!(p & 0040);
-                form.perm_grp_w.checked = !!(p & 0020);
-                form.perm_grp_x.checked = !!(p & 0010);
-                form.perm_oth_r.checked = !!(p & 0004);
-                form.perm_oth_w.checked = !!(p & 0002);
-                form.perm_oth_x.checked = !!(p & 0001);
+                form.perm_own_r.checked = !!(p & 0o400);
+                form.perm_own_w.checked = !!(p & 0o200);
+                form.perm_own_x.checked = !!(p & 0o100);
+                form.perm_grp_r.checked = !!(p & 0o040);
+                form.perm_grp_w.checked = !!(p & 0o020);
+                form.perm_grp_x.checked = !!(p & 0o010);
+                form.perm_oth_r.checked = !!(p & 0o004);
+                form.perm_oth_w.checked = !!(p & 0o002);
+                form.perm_oth_x.checked = !!(p & 0o001);
                 form.mount_setuid.checked = row.dataset.setuid === '1';
                 form.mount_setgid.checked = row.dataset.setgid === '1';
                 form.mount_boot.checked = inFstab;

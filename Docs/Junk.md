@@ -6,7 +6,7 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 
 - PHP 7.4+ with CLI/web support
 - Web server (Apache, Nginx) configured to serve this directory
-- `sudo` privileges (password‑less, since the code uses `sudo -n`) or root access for the PHP process to run `getent shadow` and the various LVM/RAID/NFS commands.  Make sure the sudoers entry includes `/bin/mkdir`, `/bin/mount`, `/bin/umount` **and `/bin/chown`**; when a new `/export/...` directory is created the backend will chown it to `nobody:nogroup` so that NFS can export the exported share before a filesystem is mounted there.
+- `sudo` privileges (password‑less, since the code uses `sudo -n`) or root access for the PHP process to run `getent shadow` and the various LVM/RAID/NFS commands.  Make sure the sudoers entry includes `/bin/mkdir`, `/bin/mount`, `/bin/umount`, `/bin/chown` **and `/bin/chmod`**; when a new `/export/...` directory is created the backend will chown it to `nobody:nogroup` (and may later adjust permissions or sticky bits) so that NFS can export the exported share before a filesystem is mounted there.
 - LVM utilities (`pvs`, `vgs`, `lvs`, `vgcreate`, `lvcreate` etc.)
 - `mdadm` for RAID creation
 - NFS utils (`exportfs`, provided by `nfs-kernel-server`/`nfs-common`)
