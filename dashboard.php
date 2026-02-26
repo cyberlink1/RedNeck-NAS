@@ -4,7 +4,12 @@ require_login();
 $user = $_SESSION['user'];
 
 // available view names map to files under views/
+// the samba view is only exposed if the system actually has Samba installed
+$sambaAvailable = file_exists('/usr/sbin/smbd') || file_exists('/usr/bin/smbd');
 $validViews = ['raid','lvm','mounts','nfs','disks'];
+if ($sambaAvailable) {
+    $validViews[] = 'samba';
+}
 // accept view name from either GET or POST so form submissions stay on the
 // same page rather than falling back to the default dashboard content.
 $view = $_REQUEST['view'] ?? '';
@@ -46,6 +51,7 @@ function nsCmdDash($cmd) {
 $totalDrives = 0;
 $raidCount = 0;
 $exportCount = 0;
+$sambaCount = 0;
 $exports = [];
 if ($view === '') {
     // existing LV and mount listing
@@ -125,6 +131,23 @@ if ($view === '') {
         }
     }
     $exportCount = count($exports);
+
+    // count samba shares if samba is available and config exists
+    if ($sambaAvailable) {
+        $conf = '/etc/samba/smb.conf';
+        if (file_exists($conf)) {
+            $lines = file($conf, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            foreach ($lines as $line) {
+                if (preg_match('/^\s*\[([^\]]+)\]/', $line, $m)) {
+                    $sec = $m[1];
+                    // ignore the global section
+                    if (strcasecmp($sec, 'global') !== 0) {
+                        $sambaCount++;
+                    }
+                }
+            }
+        }
+    }
 }
 ?>
 
@@ -150,6 +173,9 @@ if ($view === '') {
                     <li class="nav-item"><a class="nav-link <?php if ($view==='lvm') echo 'active'; ?>" href="dashboard.php?view=lvm">LVM</a></li>
                     <li class="nav-item"><a class="nav-link <?php if ($view==='mounts') echo 'active'; ?>" href="dashboard.php?view=mounts">Mounts</a></li>
                     <li class="nav-item"><a class="nav-link <?php if ($view==='nfs') echo 'active'; ?>" href="dashboard.php?view=nfs">NFS Exports</a></li>
+<?php if ($sambaAvailable): ?>
+                    <li class="nav-item"><a class="nav-link <?php if ($view==='samba') echo 'active'; ?>" href="dashboard.php?view=samba">Samba Shares</a></li>
+<?php endif; ?>
                 </ul>
                 <span class="navbar-text me-2">Logged in as <?php echo htmlspecialchars($user); ?></span>
                 <div class="form-check form-switch ms-2 mb-0">
@@ -203,6 +229,16 @@ if ($view === '') {
                         </div>
                     </div>
                 </div>
+<?php if ($sambaAvailable): ?>
+                <div class="col-sm-6 col-md-4 col-lg-2 mb-3">
+                    <div class="card stat-card">
+                        <div class="card-header">Samba Shares</div>
+                        <div class="card-body">
+                            <div class="stat-number"><?php echo $sambaCount; ?></div>
+                        </div>
+                    </div>
+                </div>
+<?php endif; ?>
             </div>
         <?php else: ?>
             <?php include __DIR__ . "/views/{$view}.php"; ?>
