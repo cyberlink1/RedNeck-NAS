@@ -9,8 +9,12 @@ document.addEventListener('DOMContentLoaded', function() {
             if (form) {
                 form.reset();
                 form.mount_setuid.checked = false;
-                form.mount_setgid.checked = false;
-            }
+                form.mount_setgid.checked = false;                // clear perms checkboxes
+                ['perm_own_r','perm_own_w','perm_own_x',
+                 'perm_grp_r','perm_grp_w','perm_grp_x',
+                 'perm_oth_r','perm_oth_w','perm_oth_x'].forEach(function(n){
+                    if (form[n]) form[n].checked = false;
+                });            }
         });
     }
     var mountTable = document.getElementById('mountTable');
@@ -32,10 +36,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     titleElt.textContent = 'Edit mount ' + dev;
                 }
                 form.mount_point.value = pt.replace(/^\/export\//, '');
-                // owner/group/perms
+                // owner/group
                 form.mount_owner.value = row.dataset.owner || '';
                 form.mount_group.value = row.dataset.group || '';
-                form.mount_perms.value = row.dataset.perms || '';
+                // permissions bits
+                var perms = row.dataset.perms || '';
+                var p = parseInt(perms, 8) || 0;
+                form.perm_own_r.checked = !!(p & 0400);
+                form.perm_own_w.checked = !!(p & 0200);
+                form.perm_own_x.checked = !!(p & 0100);
+                form.perm_grp_r.checked = !!(p & 0040);
+                form.perm_grp_w.checked = !!(p & 0020);
+                form.perm_grp_x.checked = !!(p & 0010);
+                form.perm_oth_r.checked = !!(p & 0004);
+                form.perm_oth_w.checked = !!(p & 0002);
+                form.perm_oth_x.checked = !!(p & 0001);
                 form.mount_setuid.checked = row.dataset.setuid === '1';
                 form.mount_setgid.checked = row.dataset.setgid === '1';
                 form.mount_boot.checked = inFstab;

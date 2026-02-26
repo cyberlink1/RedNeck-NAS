@@ -45,7 +45,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // apply requested ownership/permissions if provided
         $owner = trim($_POST['mount_owner'] ?? '');
         $group = trim($_POST['mount_group'] ?? '');
-        $perms = trim($_POST['mount_perms'] ?? '');
+        // build perms from checkbox matrix
+        $flag = 0;
+        if (!empty($_POST['perm_own_r'])) $flag |= 0400;
+        if (!empty($_POST['perm_own_w'])) $flag |= 0200;
+        if (!empty($_POST['perm_own_x'])) $flag |= 0100;
+        if (!empty($_POST['perm_grp_r'])) $flag |= 0040;
+        if (!empty($_POST['perm_grp_w'])) $flag |= 0020;
+        if (!empty($_POST['perm_grp_x'])) $flag |= 0010;
+        if (!empty($_POST['perm_oth_r'])) $flag |= 0004;
+        if (!empty($_POST['perm_oth_w'])) $flag |= 0002;
+        if (!empty($_POST['perm_oth_x'])) $flag |= 0001;
+        $perms = $flag ? sprintf('%04o', $flag) : '';
         $setuid = !empty($_POST['mount_setuid']);
         $setgid = !empty($_POST['mount_setgid']);
         if (is_dir($mp)) {
@@ -334,7 +345,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // apply requested ownership/permissions updates
         $owner = trim($_POST['mount_owner'] ?? '');
         $group = trim($_POST['mount_group'] ?? '');
-        $perms = trim($_POST['mount_perms'] ?? '');
+        $flag = 0;
+        if (!empty($_POST['perm_own_r'])) $flag |= 0400;
+        if (!empty($_POST['perm_own_w'])) $flag |= 0200;
+        if (!empty($_POST['perm_own_x'])) $flag |= 0100;
+        if (!empty($_POST['perm_grp_r'])) $flag |= 0040;
+        if (!empty($_POST['perm_grp_w'])) $flag |= 0020;
+        if (!empty($_POST['perm_grp_x'])) $flag |= 0010;
+        if (!empty($_POST['perm_oth_r'])) $flag |= 0004;
+        if (!empty($_POST['perm_oth_w'])) $flag |= 0002;
+        if (!empty($_POST['perm_oth_x'])) $flag |= 0001;
+        $perms = $flag ? sprintf('%04o', $flag) : '';
         $setuid = !empty($_POST['mount_setuid']);
         $setgid = !empty($_POST['mount_setgid']);
         if (is_dir($mp)) {
@@ -711,8 +732,27 @@ if (count($mounts) === 0 && count($mnts) > 0) {
                 <input name="mount_group" class="form-control" placeholder="group">
             </div>
             <div class="mb-3">
-                <label class="form-label">Permissions (octal)</label>
-                <input name="mount_perms" class="form-control" placeholder="0755">
+                <label class="form-label">Permissions</label>
+                <table class="table table-sm">
+                  <thead><tr><th></th><th>Read</th><th>Write</th><th>Exec</th></tr></thead>
+                  <tbody>
+                    <tr><td>Owner</td>
+                        <td><input type="checkbox" name="perm_own_r"></td>
+                        <td><input type="checkbox" name="perm_own_w"></td>
+                        <td><input type="checkbox" name="perm_own_x"></td>
+                    </tr>
+                    <tr><td>Group</td>
+                        <td><input type="checkbox" name="perm_grp_r"></td>
+                        <td><input type="checkbox" name="perm_grp_w"></td>
+                        <td><input type="checkbox" name="perm_grp_x"></td>
+                    </tr>
+                    <tr><td>Other</td>
+                        <td><input type="checkbox" name="perm_oth_r"></td>
+                        <td><input type="checkbox" name="perm_oth_w"></td>
+                        <td><input type="checkbox" name="perm_oth_x"></td>
+                    </tr>
+                  </tbody>
+                </table>
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="mount_setuid" id="mountSetuid">
                     <label class="form-check-label" for="mountSetuid">setuid</label>
@@ -774,8 +814,27 @@ if (count($mounts) === 0 && count($mnts) > 0) {
                 <input name="mount_group" id="editMountGroup" class="form-control">
             </div>
             <div class="mb-3">
-                <label class="form-label">Permissions (octal)</label>
-                <input name="mount_perms" id="editMountPerms" class="form-control">
+                <label class="form-label">Permissions</label>
+                <table class="table table-sm">
+                  <thead><tr><th></th><th>Read</th><th>Write</th><th>Exec</th></tr></thead>
+                  <tbody>
+                    <tr><td>Owner</td>
+                        <td><input type="checkbox" name="perm_own_r" id="editPermOwnR"></td>
+                        <td><input type="checkbox" name="perm_own_w" id="editPermOwnW"></td>
+                        <td><input type="checkbox" name="perm_own_x" id="editPermOwnX"></td>
+                    </tr>
+                    <tr><td>Group</td>
+                        <td><input type="checkbox" name="perm_grp_r" id="editPermGrpR"></td>
+                        <td><input type="checkbox" name="perm_grp_w" id="editPermGrpW"></td>
+                        <td><input type="checkbox" name="perm_grp_x" id="editPermGrpX"></td>
+                    </tr>
+                    <tr><td>Other</td>
+                        <td><input type="checkbox" name="perm_oth_r" id="editPermOthR"></td>
+                        <td><input type="checkbox" name="perm_oth_w" id="editPermOthW"></td>
+                        <td><input type="checkbox" name="perm_oth_x" id="editPermOthX"></td>
+                    </tr>
+                  </tbody>
+                </table>
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="mount_setuid" id="editMountSetuid">
                     <label class="form-check-label" for="editMountSetuid">setuid</label>
