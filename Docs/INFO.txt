@@ -13,6 +13,7 @@ commands to manage:
   - Filesystems (mkfs, mount, umount)
   - /etc/fstab entries (systemd daemon-reload automatically)
   - NFS exports (/etc/exports)
+  - Samba shares (/etc/samba/smb.conf)  # only available if Samba is installed; options may be edited in the UI (read only, guest ok, etc.)
 
 The system itself remains the single source of truth.
 If something changes via SSH, the UI reflects it immediately.

@@ -101,7 +101,13 @@
 **Q:** How are NFS exports managed?  
 
 **A:** You can create, edit, and delete exports. RNN updates `/etc/exports` and runs `exportfs -ra`. Comments associated with export lines are also cleaned up.
+---
 
+### 13. How are Samba shares managed?
+
+**Q:** How are Samba shares managed\?  
+
+**A:** If Samba is installed, a “Samba Shares” view appears. Shares are listed in a table; click a row to open a modal that lets you rename, change the path, add a comment or specify arbitrary share options (key/value pairs such as `read only = yes`, `guest ok = yes`, etc.), or delete the share. New shares are created via a similar dialog. RNN updates `/etc/samba/smb.conf` and restarts `smbd` via `systemctl` after any change. The menu option and dashboard card only appear when the Samba daemon (`smbd`) is present on the host.
 ---
 
 ### 12. Login fails even though my password is correct

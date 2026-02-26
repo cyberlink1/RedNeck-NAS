@@ -7,6 +7,7 @@
 #
 set -euo pipefail
 
+# core packages; Samba is intentionally omitted – install it yourself if you need the shares view
 REQUIRED_PKGS=(sudo pamtester lvm2 php php-cli apache2 php-common mdadm util-linux parted gdisk smartmontools nfs-kernel-server)
 # apache2/php packages above are typical; adjust if using nginx
 # add nfs-kernel-server so exportfs and related utilities are available

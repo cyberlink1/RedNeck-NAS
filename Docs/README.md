@@ -14,6 +14,7 @@ commands to manage:
   - Filesystems (mkfs, mount, umount)
   - /etc/fstab entries
   - NFS exports (/etc/exports)
+  - Samba shares (/etc/samba/smb.conf)  # menu appears only when Samba is installed; share options (read only, guest ok, etc.) can be set in the create/edit dialog; click a share to edit/remove (modal dialogs)
 
 The system itself remains the single source of truth.
 If something changes via SSH, the UI reflects it immediately.
@@ -48,6 +49,8 @@ For most experienced Linux administrators, the command line is the default solut
 - `lvm2`
 - `mount`
 - `/etc/exports`
+- Samba shares (`/etc/samba/smb.conf`) (requires installing Samba manually)
+
 
 It works. It is reliable. It is usually the right answer.
 
@@ -116,6 +119,7 @@ Finish installation and reboot.
 - cd /home/(username where you uploaded repo)
 - ./install.sh
 - usermod -aG nfs youruser
+- optionally install Samba (`apt install samba`) if you want the Samba Shares view (menu appears only when `smbd` is present); you can configure share options via the UI
 - open browser to http://server-ip/
 
 The install.sh is less than 100 lines and designed to run on Debian 13 Trixie. Though the only changes needed to run on another distro is the package names and package managment install. 
