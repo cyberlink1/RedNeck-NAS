@@ -293,12 +293,11 @@ $allowedSmbOpts = [
             </div>
             <div class="mb-3">
                 <label class="form-label">Path</label>
-                <input type="text" name="share_path" id="share_path" class="form-control" list="sharePaths" required>
-                <datalist id="sharePaths">
+                <select name="share_path" id="share_path" class="form-control" required>
                     <?php foreach ($shareDirs as $d): ?>
-                        <option value="<?php echo htmlspecialchars($d); ?>">
+                        <option value="<?php echo htmlspecialchars($d); ?>"><?php echo htmlspecialchars($d); ?></option>
                     <?php endforeach; ?>
-                </datalist>
+                </select>
             </div>
             <div class="mb-3">
                 <label class="form-label">Options</label>
@@ -352,7 +351,11 @@ var sambaDirs = <?php echo json_encode($shareDirs, JSON_HEX_TAG|JSON_HEX_AMP); ?
             </div>
             <div class="mb-3">
                 <label class="form-label">Path</label>
-                <input type="text" name="share_path" id="editSharePath" class="form-control" list="sharePaths" required>
+                <select name="share_path" id="editSharePath" class="form-control" required>
+                    <?php foreach ($shareDirs as $d): ?>
+                        <option value="<?php echo htmlspecialchars($d); ?>"><?php echo htmlspecialchars($d); ?></option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             <div class="mb-3">
                 <label class="form-label">Options</label>
