@@ -88,6 +88,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     continue;
                 }
                 if (preg_match('/^\s*\[' . preg_quote($old, '/') . '\]\s*$/', $trim)) {
+                    // remove any comment lines immediately preceding the section header
+                    while (!empty($new)) {
+                        $lastLine = $new[count($new)-1];
+                        if (preg_match('/^\s*[#;]/', trim($lastLine))) {
+                            array_pop($new);
+                        } else {
+                            break;
+                        }
+                    }
                     $skip = true;
                     continue;
                 }
