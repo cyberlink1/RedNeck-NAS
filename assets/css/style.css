@@ -197,6 +197,17 @@ body {
     border-color: var(--accent);
 }
 
+/* make physical-volume rows appear clickable */
+.pv-row {
+    cursor: pointer;
+}
+.pv-row:hover {
+    background-color: #e9ecef; /* light hover; bootstrap table secondary */
+}
+.dark-mode .pv-row:hover {
+    background-color: #214a21; /* darker hover in dark mode */
+}
+
 /* custom class for main background; body will use this when dark mode is active */
 .bg-main {
     background-color: var(--bg-main) !important;

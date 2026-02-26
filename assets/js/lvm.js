@@ -158,6 +158,25 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // enable clicking on PV rows to show details (delegated handler)
+    var pvTable = document.getElementById('pvTable');
+    if (pvTable) {
+        pvTable.addEventListener('click', function(e) {
+            var row = e.target.closest('tr.pv-row');
+            if (!row) return;
+            var pv = row.dataset.pv || '';
+            console.log('PV row clicked', pv);
+            if (!pv) return;
+            fetchAuth('views/lvm.php?ajax=1&pv=' + encodeURIComponent(pv))
+                .then(function(resp){ return resp.text(); })
+                .then(function(html){
+                    console.log('PV AJAX response', html);
+                    showInfo(html);
+                })
+                .catch(function(err){ console.error('pv AJAX error', err); });
+        });
+    }
+
     // confirm format/remove forms for logical volumes
     var formatLvForm = document.getElementById('formatLvForm');
     if (formatLvForm) {
@@ -389,6 +408,86 @@ document.addEventListener('DOMContentLoaded', function() {
             showSpinner(); snapForm.submit();
         });
     });
+
+    // PV action forms
+    var checkPvForm = document.getElementById('checkPvForm');
+    if (checkPvForm) {
+        checkPvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Run consistency check on the physical volume?', function() {
+                var inp = document.createElement('input'); inp.type='hidden'; inp.name='check_pv'; inp.value='1';
+                checkPvForm.appendChild(inp);
+                showSpinner(); checkPvForm.submit();
+            });
+        });
+    }
+    var repairPvForm = document.getElementById('repairPvForm');
+    if (repairPvForm) {
+        repairPvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Attempt repair of the physical volume?', function() {
+                var inp = document.createElement('input'); inp.type='hidden'; inp.name='repair_pv'; inp.value='1';
+                repairPvForm.appendChild(inp);
+                showSpinner(); repairPvForm.submit();
+            });
+        });
+    }
+    var movePvForm = document.getElementById('movePvForm');
+    if (movePvForm) {
+        movePvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var dest = movePvForm.dest_pv.value;
+            if (!dest) {
+                showConfirmation('Please select a destination PV.');
+                return;
+            }
+            showConfirmation('Move data from ' + movePvForm.pv.value + ' to ' + dest + '?', function() {
+                var inp = document.createElement('input'); inp.type='hidden'; inp.name='move_pv'; inp.value='1';
+                movePvForm.appendChild(inp);
+                showSpinner(); movePvForm.submit();
+            });
+        });
+        // disable current pv option when showing
+        var mvModal = document.getElementById('movePvModal');
+        if (mvModal) {
+            mvModal.addEventListener('show.bs.modal', function() {
+                var src = movePvForm.pv.value;
+                var sel = movePvForm.dest_pv;
+                if (sel) {
+                    Array.from(sel.options).forEach(function(opt) {
+                        opt.disabled = (opt.value === src || opt.value === '');
+                    });
+                }
+            });
+        }
+    }
+    var resizePvForm = document.getElementById('resizePvForm');
+    if (resizePvForm) {
+        resizePvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var size = resizePvForm.new_size.value;
+            if (!size) {
+                showConfirmation('Please specify a new size.');
+                return;
+            }
+            showConfirmation('Resize ' + resizePvForm.pv.value + ' to ' + size + '?', function() {
+                var inp = document.createElement('input'); inp.type='hidden'; inp.name='resize_pv'; inp.value='1';
+                resizePvForm.appendChild(inp);
+                showSpinner(); resizePvForm.submit();
+            });
+        });
+    }
+    var removePvForm = document.getElementById('removePvForm');
+    if (removePvForm) {
+        removePvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showConfirmation('Remove the selected physical volume? This is irreversible.', function() {
+                var inp = document.createElement('input'); inp.type='hidden'; inp.name='remove_pv'; inp.value='1';
+                removePvForm.appendChild(inp);
+                showSpinner(); removePvForm.submit();
+            });
+        });
+    }
     var openRemoveVg = document.getElementById('btnOpenRemoveVg');
     var thinPoolForm = document.getElementById('createThinPoolForm');
     if (thinPoolForm) {

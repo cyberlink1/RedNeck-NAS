@@ -1,4 +1,13 @@
 <?php
+// LVM/RAID view (included by dashboard.php) or invoked directly via
+// AJAX. When called directly (e.g. from JavaScript) we must load helper
+// functions and enforce login exactly like the other view scripts.
+
+if (!defined('IN_DASHBOARD')) {
+    require_once __DIR__ . '/../functions.php';
+    require_login();
+}
+
 // LVM/RAID view (included by dashboard.php). The dashboard already
 // performs authentication and loads functions.php, so we do not
 // re‑require or re‑login here.
@@ -10,6 +19,29 @@ function list_pvs() {
     // remove duplicate lines if any
     return array_values(array_unique($out));
 }
+
+// AJAX handler for returning PV details when rows are clicked.  The
+// disk/raid views already use a similar pattern; we call pvdisplay so
+// the administrator sees the same information they would get on the
+// command line.  Because pvdisplay isn’t currently covered by the sudoers
+// file we will update install.sh accordingly.
+if (isset($_GET['ajax']) && isset($_GET['pv'])) {
+    $pvPath = $_GET['pv'];
+    // normalize name to start with /dev/
+    $pvPath = preg_replace('#^/dev/#','/dev/',$pvPath);
+    $detail = run_cmd('sudo pvdisplay ' . escapeshellarg($pvPath));
+    echo '<div><pre>' . htmlspecialchars(implode("\n", $detail)) . '</pre></div>';
+    // action buttons for PV operations
+    echo '<div class="action-buttons mt-2">';
+    echo '<button id="btnCheckPv" class="btn btn-sm btn-secondary me-1" data-pv="' . htmlspecialchars($pvPath) . '">Check</button>';
+    echo '<button id="btnRepairPv" class="btn btn-sm btn-secondary me-1" data-pv="' . htmlspecialchars($pvPath) . '">Repair</button>';
+    echo '<button id="btnMovePv" class="btn btn-sm btn-secondary me-1" data-pv="' . htmlspecialchars($pvPath) . '">Move</button>';
+    echo '<button id="btnResizePv" class="btn btn-sm btn-secondary me-1" data-pv="' . htmlspecialchars($pvPath) . '">Resize</button>';
+    echo '<button id="btnRemovePv" class="btn btn-sm btn-danger me-1" data-pv="' . htmlspecialchars($pvPath) . '">Remove</button>';
+    echo '</div>';
+    exit;
+}
+
 function list_vgs() {
     return run_cmd('sudo vgs --noheadings -o vg_name,vg_size,vg_free');
 }
@@ -152,6 +184,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $outs = array_merge($outs, run_cmd("sudo pvcreate " . escapeshellarg($d)));
         }
         $message = implode("<br>", $outs);
+    } elseif (isset($_POST['check_pv'])) {
+        $pv = $_POST['pv'] ?? '';
+        if ($pv) {
+            $out = run_cmd("sudo pvck " . escapeshellarg($pv));
+            $message = '<pre>' . htmlspecialchars(implode("\n", $out)) . '</pre>';
+        } else {
+            $message = 'No physical volume selected.';
+        }
+    } elseif (isset($_POST['repair_pv'])) {
+        $pv = $_POST['pv'] ?? '';
+        if ($pv) {
+            $out = run_cmd("sudo pvck --repair " . escapeshellarg($pv));
+            // some older pvck versions don't support --repair; if we detect
+            // that we'll run a plain pvck afterwards and note the fallback.
+            $needFallback = false;
+            foreach ($out as $line) {
+                if (stripos($line, 'does not accept option') !== false) {
+                    $needFallback = true;
+                    break;
+                }
+            }
+            if ($needFallback) {
+                $out[] = '';
+                $out[] = 'pvck --repair not supported by this version; running pvck without repair option:';
+                $out = array_merge($out, run_cmd("sudo pvck " . escapeshellarg($pv)));
+            }
+            $message = '<pre>' . htmlspecialchars(implode("\n", $out)) . '</pre>';
+        } else {
+            $message = 'No physical volume selected.';
+        }
+    } elseif (isset($_POST['move_pv'])) {
+        $src = $_POST['pv'] ?? '';
+        $dst = $_POST['dest_pv'] ?? '';
+        if ($src && $dst) {
+            $out = run_cmd("sudo pvmove " . escapeshellarg($src) . " " . escapeshellarg($dst));
+            $message = '<pre>' . htmlspecialchars(implode("\n", $out)) . '</pre>';
+        } else {
+            $message = 'Source or destination physical volume missing.';
+        }
+    } elseif (isset($_POST['resize_pv'])) {
+        $pv = $_POST['pv'] ?? '';
+        $size = $_POST['new_size'] ?? '';
+        if ($pv && $size) {
+            $out = run_cmd("sudo pvresize -v --setphysicalvolumesize " . escapeshellarg($size) . " " . escapeshellarg($pv));
+            $message = '<pre>' . htmlspecialchars(implode("\n", $out)) . '</pre>';
+        } else {
+            $message = 'Physical volume or new size missing.';
+        }
+    } elseif (isset($_POST['remove_pv'])) {
+        $pv = $_POST['pv'] ?? '';
+        if ($pv) {
+            $out = run_cmd("sudo pvremove -ff " . escapeshellarg($pv));
+            $message = '<pre>' . htmlspecialchars(implode("\n", $out)) . '</pre>';
+        } else {
+            $message = 'No physical volume selected.';
+        }
     } elseif (isset($_POST['create_vg'])) {
         $name = escapeshellarg($_POST['vg_name']);
         $sel = $_POST['pvs'] ?? [];
@@ -429,6 +517,7 @@ foreach ($disks as $line) {
         'vg'        => '',
         'size'      => $size,
         'available' => true,
+        'is_pv'     => false,
     ];
 }
 foreach ($pvs as $line) {
@@ -451,6 +540,7 @@ foreach ($pvs as $line) {
         'vg'        => $vg,
         'size'      => $size,
         'available' => false,
+        'is_pv'     => true,
     ];
 }
 $anyAvailable = false;
@@ -486,7 +576,7 @@ sort($fsTypes);
                     <em>No disks or physical volumes detected.</em>
                 <?php else: ?>
                     <form method="post" id="initForm">
-                    <table class="table table-sm">
+                    <table id="pvTable" class="table table-sm">
                         <thead>
                             <tr>
                                 <th></th>
@@ -498,7 +588,7 @@ sort($fsTypes);
                         </thead>
                         <tbody>
                         <?php foreach ($rows as $r): ?>
-                            <tr>
+                            <tr<?php if (!empty($r['is_pv'])) echo ' class="pv-row" data-pv="' . htmlspecialchars($r['device']) . '"'; ?>>
                                 <td>
                                     <?php if ($r['available']): ?>
                                         <input type="checkbox" name="disks[]" value="<?php echo htmlspecialchars($r['device']); ?>">
@@ -939,6 +1029,166 @@ sort($fsTypes);
        <button type="button" class="btn btn-secondary btn-cancel ms-2" data-bs-dismiss="modal">Cancel</button>
     </div>
    </div>
+  </div>
+</div>
+
+<!-- simple result modal for notifications (does *not* hide infoModal) -->
+<div class="modal fade" id="resultModal" tabindex="-1" aria-hidden="1">
+  <div class="modal-dialog">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Result</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body"></div>
+    <div class="modal-footer">
+       <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+       <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+    </div>
+   </div>
+  </div>
+</div>
+<!-- info/preview modal used for disk row clicks -->
+<div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Details</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body"></div>
+    <div class="modal-footer">
+       <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+    </div>
+   </div>
+  </div>
+</div>
+
+<!-- PV action modals -->
+
+<!-- check PV -->
+<div class="modal fade" id="checkPvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Check Physical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" id="checkPvForm">
+      <div class="modal-body">
+            <input type="hidden" name="pv" value="">
+            <p>Run a consistency check on the selected physical volume?</p>
+      </div>
+      <div class="modal-footer d-flex justify-content-end">
+        <button id="btnPvCheckSubmit" type="submit" class="btn btn-primary">Check</button>
+        <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+      </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- repair PV -->
+<div class="modal fade" id="repairPvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Repair Physical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" id="repairPvForm">
+      <div class="modal-body">
+            <input type="hidden" name="pv" value="">
+            <p>Attempt to repair metadata on the selected physical volume?</p>
+      </div>
+      <div class="modal-footer d-flex justify-content-end">
+        <button id="btnPvRepairSubmit" type="submit" class="btn btn-primary">Repair</button>
+        <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+      </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- move PV -->
+<div class="modal fade" id="movePvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Move Physical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" id="movePvForm">
+      <div class="modal-body">
+            <input type="hidden" name="pv" value="">
+            <div class="mb-3">
+                <label class="form-label">Destination PV</label>
+                <select name="dest_pv" class="form-select">
+                    <option value="">-- choose --</option>
+                    <?php
+                        foreach ($pvs as $line) {
+                            $parts = explode('|', trim($line));
+                            $name = trim($parts[0] ?? '');
+                            if (!$name) continue;
+                            echo '<option value="' . htmlspecialchars($name) . '">' . htmlspecialchars($name) . '</option>';
+                        }
+                    ?>
+                </select>
+            </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-end">
+        <button id="btnPvMoveSubmit" type="submit" class="btn btn-primary">Move</button>
+        <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+      </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- resize PV -->
+<div class="modal fade" id="resizePvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Resize Physical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" id="resizePvForm">
+      <div class="modal-body">
+            <input type="hidden" name="pv" value="">
+            <div class="mb-3">
+                <label class="form-label">New Size (e.g. 10G)</label>
+                <input name="new_size" class="form-control" required>
+            </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-end">
+        <button id="btnPvResizeSubmit" type="submit" class="btn btn-primary">Resize</button>
+        <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+      </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- remove PV -->
+<div class="modal fade" id="removePvModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Remove Physical Volume</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" id="removePvForm">
+      <div class="modal-body">
+            <input type="hidden" name="pv" value="">
+            <p>Remove the selected physical volume? Data on it will be lost.</p>
+      </div>
+      <div class="modal-footer d-flex justify-content-end">
+        <button id="btnPvRemoveSubmit" type="submit" class="btn btn-danger">Remove</button>
+        <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">Cancel</button>
+      </div>
+      </form>
+    </div>
   </div>
 </div>
 

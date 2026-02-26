@@ -224,69 +224,32 @@ function attachDiskHandlers(root) {
             }
         });
     });
-}
-
-function submitDiskFormAjax(form) {
-    showSpinner();
-    var data = new FormData(form);
-    var diskInput = form.querySelector('input[name="disk"]');
-    if (diskInput && diskInput.value) {
-        data.set('disk', diskInput.value);
-    }
-    if (form._lastSubmitName) {
-        data.append(form._lastSubmitName, form._lastSubmitValue);
-    }
-    data.append('ajax', '1');
-    fetchAuth('views/disks.php', { method: 'POST', body: data })
-        .then(function(resp) { return resp.text(); })
-        .then(function(newHtml) {
-            hideSpinner();
-            if (newHtml.trim() === '') {
-                showResult('Error: no response from server (disk may be unset)');
-                return;
+    // PV-specific action buttons inside info modal
+    var pvActions = root.querySelectorAll('#btnCheckPv, #btnRepairPv, #btnMovePv, #btnResizePv, #btnRemovePv');
+    pvActions.forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            var action = btn.id.replace('btn','').toLowerCase();
+            var pv = btn.dataset.pv;
+            switch(action) {
+                case 'checkpv':
+                    openSubmodal('checkPvModal', pv);
+                    break;
+                case 'repairpv':
+                    openSubmodal('repairPvModal', pv);
+                    break;
+                case 'movepv':
+                    openSubmodal('movePvModal', pv);
+                    break;
+                case 'resizepv':
+                    openSubmodal('resizePvModal', pv);
+                    break;
+                case 'removepv':
+                    openSubmodal('removePvModal', pv);
+                    break;
             }
-            ['createPartModal','deletePartModal','formatPartModal'].forEach(function(id) {
-                var m = document.getElementById(id);
-                var inst = bootstrap.Modal.getInstance(m);
-                if (inst && m.classList.contains('show')) inst.hide();
-            });
-            var temp = document.createElement('div');
-            temp.innerHTML = newHtml;
-            var genericMsg = null;
-            var alertElt = temp.querySelector('.alert.alert-info');
-            if (alertElt) {
-                genericMsg = alertElt.innerHTML.trim();
-                alertElt.remove();
-            }
-            var res = temp.querySelector('#formatResult');
-            var fmtOk, fmtMsg;
-            if (res) {
-                fmtOk = res.dataset.ok === '1';
-                fmtMsg = res.dataset.msg || (fmtOk ? 'Format completed.' : 'Format failed.');
-                res.remove();
-            }
-            newHtml = temp.innerHTML;
-            showInfo(newHtml);
-            if (typeof fmtOk !== 'undefined' || genericMsg) {
-                var infoModal = document.getElementById('infoModal');
-                var doShow = function() { showResult(genericMsg || fmtMsg); };
-                if (infoModal && infoModal.classList.contains('show')) {
-                    doShow();
-                } else if (infoModal) {
-                    var handler = function() {
-                        infoModal.removeEventListener('shown.bs.modal', handler);
-                        doShow();
-                    };
-                    infoModal.addEventListener('shown.bs.modal', handler);
-                } else {
-                    doShow();
-                }
-            }
-        })
-        .catch(function(err) {
-            console.error('modal form ajax error', err);
-            hideSpinner();
         });
+    });
 }
 
 function openAddRaidModal(raidDev, isSpare) {
@@ -418,7 +381,7 @@ function openSubmodal(subId, disk) {
     var doShow = function() {
         var sub = document.getElementById(subId);
         if (!sub) return;
-        var hid = sub.querySelector('input[name=disk]');
+        var hid = sub.querySelector('input[name=disk]') || sub.querySelector('input[name=pv]');
         if (hid) hid.value = disk;
         if (disk.startsWith('/dev/md')) {
             var raidInp = sub.querySelector('input[name=raid]');
@@ -434,7 +397,8 @@ function openSubmodal(subId, disk) {
                 raidInp.value = '1';
             }
         }
-        sub.querySelectorAll('input[name="size"], select[name="part_num"]').forEach(function(i){ i.value = ''; });
+        // clear non-hidden input/select fields (but not the hidden pv/disk)
+        sub.querySelectorAll('input:not([type=hidden]), select').forEach(function(i){ i.value = ''; });
         if (subId === 'createPartModal' && disk.startsWith('/dev/md')) {
             if (!sub.querySelector('.raid-note')) {
                 var note = document.createElement('div');

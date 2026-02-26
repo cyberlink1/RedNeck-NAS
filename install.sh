@@ -42,7 +42,8 @@ www-data ALL=(ALL) NOPASSWD: \
     /usr/bin/getent, /usr/bin/nsenter, /sbin/mdadm, /usr/sbin/mdadm, \
     /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, \
     /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, \
-    /sbin/pvcreate, /sbin/pvremove, /sbin/pvs, /sbin/vgs, /sbin/lvs, \
+    /sbin/pvcreate, /sbin/pvremove, /sbin/pvck, /sbin/pvrepair, /sbin/pvdisplay, /sbin/pvresize, /sbin/pvmove, \  # PV maintenance utilities used by the detail modal
+    /sbin/vgs, /sbin/lvs, \
     /sbin/exportfs, /usr/sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, \
     /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, \
     /bin/mkdir, /bin/rmdir, /bin/chown, /bin/chmod, /usr/sbin/parted, /usr/sbin/sgdisk, \

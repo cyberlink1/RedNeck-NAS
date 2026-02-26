@@ -7,7 +7,7 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 - PHP 7.4+ with CLI/web support
 - Web server (Apache, Nginx) configured to serve this directory
 - `sudo` privileges (password‑less, since the code uses `sudo -n`) or root access for the PHP process to run `getent shadow` and the various LVM/RAID/NFS commands.  Make sure the sudoers entry includes `/bin/mkdir`, `/bin/mount`, `/bin/umount`, `/bin/chown` **and `/bin/chmod`**; when a new `/export/...` directory is created the backend will chown it to `nobody:nogroup` (and may later adjust permissions or sticky bits) so that NFS can export the exported share before a filesystem is mounted there.
-- LVM utilities (`pvs`, `vgs`, `lvs`, `vgcreate`, `lvcreate` etc.)
+- LVM utilities (`pvs`, `vgs`, `lvs`, `vgcreate`, `lvcreate` etc.) plus the new physical‑volume helpers (`pvck`, `pvrepair`, `pvmove`, `pvresize`, `pvremove`) introduced by the PV detail modal
 - `mdadm` for RAID creation
 - NFS utils (`exportfs`, provided by `nfs-kernel-server`/`nfs-common`)
 - `nsenter` (from `util-linux`; used to inspect the host's mount namespace so all `/export/*` mounts are detected)
@@ -24,7 +24,8 @@ This repository contains a simple PHP + JavaScript web UI to manage LVM/RAID con
 2. Ensure the PHP process can read `/etc/shadow` (typically running as root or via sudo).  The code invokes `sudo getent shadow …`, and **sudoers entries must match the command path only**; arguments are not considered.  In other words, the previous example with `/usr/bin/getent shadow` did *not* match when the script added the username argument (`cl`), which is why you were still prompted for a password.  You should instead permit the `getent` binary itself (or allow any argument with a wildcard):
    ```
 www-data ALL=(ALL) NOPASSWD: \
-    /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, /sbin/pvcreate, /sbin/pvremove, \
+    /usr/bin/getent, /sbin/mdadm, /usr/sbin/mdadm, /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, \
+    /sbin/pvcreate, /sbin/pvremove, /sbin/pvck, /sbin/pvrepair, /sbin/pvmove, /sbin/pvresize, \
     /sbin/pvs, /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/chown, /bin/rmdir, \
     /usr/sbin/exportfs, \
     /usr/sbin/parted, /usr/sbin/sgdisk, /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, /bin/systemctl \  # tee needed for adding fstab entries; systemctl reloads units
