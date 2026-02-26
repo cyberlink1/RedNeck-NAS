@@ -229,11 +229,12 @@ sort($shareDirs);
 
 <?php
 // list of common Samba share options for the pulldown; clients can still type
-// custom values thanks to the datalist element.
+// custom values thanks to the datalist element.  note that comment/path are
+// managed by the main form and therefore are excluded from this list.
 $allowedSmbOpts = [
     'read only','guest ok','browseable','valid users','writeable',
-    'force user','force group','create mask','directory mask','comment',
-    'vfs objects','path'
+    'force user','force group','create mask','directory mask',
+    'vfs objects'
 ];
 ?>
 <datalist id="shareOptionNames">
