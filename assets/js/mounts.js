@@ -1,6 +1,18 @@
 // mounts view specific behaviors
 
 document.addEventListener('DOMContentLoaded', function() {
+    // prepare create modal by resetting additional fields
+    var createMountModal = document.getElementById('createMountModal');
+    if (createMountModal) {
+        createMountModal.addEventListener('show.bs.modal', function() {
+            var form = document.getElementById('mountForm');
+            if (form) {
+                form.reset();
+                form.mount_setuid.checked = false;
+                form.mount_setgid.checked = false;
+            }
+        });
+    }
     var mountTable = document.getElementById('mountTable');
     if (mountTable) {
         document.querySelectorAll('#mountTable tbody tr').forEach(function(row) {
@@ -20,6 +32,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     titleElt.textContent = 'Edit mount ' + dev;
                 }
                 form.mount_point.value = pt.replace(/^\/export\//, '');
+                // owner/group/perms
+                form.mount_owner.value = row.dataset.owner || '';
+                form.mount_group.value = row.dataset.group || '';
+                form.mount_perms.value = row.dataset.perms || '';
+                form.mount_setuid.checked = row.dataset.setuid === '1';
+                form.mount_setgid.checked = row.dataset.setgid === '1';
                 form.mount_boot.checked = inFstab;
                 form.querySelectorAll('input[name="mount_opts[]"]').forEach(function(cb) {
                     cb.checked = opts.split(',').includes(cb.value);
@@ -57,7 +75,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (dev) {
                 msg = 'Mount ' + dev + '?';
             }
-            msg += '\nThis will create or use /export/' + (sub ? sub : '<em>subdir</em>') + '.\nNewly created directories are automatically chown\'ed to nobody:nogroup so they can be exported via NFS.';
+            msg += '\nThis will create or use /export/' + (sub ? sub : '<em>subdir</em>') + '.\nYou may also specify owner/group and permissions for the directory; if omitted the default nobody:nogroup and standard modes are used.';
             showConfirmation(msg, function() {
                 if (!mountBtn.form.querySelector('input[name="mount_lv"]')) {
                     var hid = document.createElement('input');

@@ -42,9 +42,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // filesystem is mounted).
         $existed = is_dir($mp);
         $out = run_cmd("sudo -n /bin/mkdir -p $mpEsc");
-        // if we just created the directory, set owner to nobody:nogroup so NFS can
-        // later export it even when a filesystem is mounted there.
-        if (!$existed && is_dir($mp)) {
+        // apply requested ownership/permissions if provided
+        $owner = trim($_POST['mount_owner'] ?? '');
+        $group = trim($_POST['mount_group'] ?? '');
+        $perms = trim($_POST['mount_perms'] ?? '');
+        $setuid = !empty($_POST['mount_setuid']);
+        $setgid = !empty($_POST['mount_setgid']);
+        if (is_dir($mp)) {
+            if ($owner !== '' || $group !== '') {
+                $spec = ($owner !== '' ? $owner : '') . ':' . ($group !== '' ? $group : '');
+                $chownOut = run_cmd("sudo -n /bin/chown $spec $mpEsc");
+                if (preg_grep('/\(exit\s+[1-9]/', $chownOut)) {
+                    $out = array_merge($out, ['chown failed: ' . implode(' | ', $chownOut)]);
+                }
+            }
+            if ($perms !== '') {
+                $chmodOut = run_cmd("sudo -n /bin/chmod " . escapeshellarg($perms) . " $mpEsc");
+                if (preg_grep('/\(exit\s+[1-9]/', $chmodOut)) {
+                    $out = array_merge($out, ['chmod failed: ' . implode(' | ', $chmodOut)]);
+                }
+            }
+            if ($setuid) {
+                run_cmd("sudo -n /bin/chmod u+s $mpEsc");
+            }
+            if ($setgid) {
+                run_cmd("sudo -n /bin/chmod g+s $mpEsc");
+            }
+        }
+        // if we just created the directory and not specified explicit owner,
+        // default to nobody:nogroup so NFS can export it even when a filesystem
+        // is mounted there.
+        if (!$existed && is_dir($mp) && $owner === '' && $group === '') {
             $chownOut = run_cmd("sudo -n /bin/chown nobody:nogroup $mpEsc");
             if (preg_grep('/\(exit\s+[1-9]/', $chownOut)) {
                 $out = array_merge($out, ['chown failed: ' . implode(' | ', $chownOut)]);
@@ -303,7 +331,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // prior to a mount being placed on top of it.
         $existed = is_dir($mp);
         $out = run_cmd("sudo /bin/mkdir -p $mpEsc");
-        if (!$existed && is_dir($mp)) {
+        // apply requested ownership/permissions updates
+        $owner = trim($_POST['mount_owner'] ?? '');
+        $group = trim($_POST['mount_group'] ?? '');
+        $perms = trim($_POST['mount_perms'] ?? '');
+        $setuid = !empty($_POST['mount_setuid']);
+        $setgid = !empty($_POST['mount_setgid']);
+        if (is_dir($mp)) {
+            if ($owner !== '' || $group !== '') {
+                $spec = ($owner !== '' ? $owner : '') . ':' . ($group !== '' ? $group : '');
+                $chownOut = run_cmd("sudo -n /bin/chown $spec $mpEsc");
+                if (preg_grep('/\(exit\s+[1-9]/', $chownOut)) {
+                    $out = array_merge($out, ['chown failed: ' . implode(' | ', $chownOut)]);
+                }
+            }
+            if ($perms !== '') {
+                $chmodOut = run_cmd("sudo -n /bin/chmod " . escapeshellarg($perms) . " $mpEsc");
+                if (preg_grep('/\(exit\s+[1-9]/', $chmodOut)) {
+                    $out = array_merge($out, ['chmod failed: ' . implode(' | ', $chmodOut)]);
+                }
+            }
+            if ($setuid) {
+                run_cmd("sudo -n /bin/chmod u+s $mpEsc");
+            }
+            if ($setgid) {
+                run_cmd("sudo -n /bin/chmod g+s $mpEsc");
+            }
+        }
+        if (!$existed && is_dir($mp) && $owner === '' && $group === '') {
             $chownOut = run_cmd("sudo -n /bin/chown nobody:nogroup $mpEsc");
             if (preg_grep('/\(exit\s+[1-9]/', $chownOut)) {
                 $out = array_merge($out, ['chown failed: ' . implode(' | ', $chownOut)]);
@@ -484,7 +539,35 @@ foreach ($mnts as $m) {
                 break;
             }
         }
-        $mounts[] = ['dev' => $mm[1], 'pt' => $pt, 'opts' => $mm[4], 'fstab' => $inFstab];
+        // collect ownership and permissions
+        $ownerName = '';
+        $groupName = '';
+        $perms = '';
+        $setuid = 0;
+        $setgid = 0;
+        if (is_dir($pt) || is_file($pt)) {
+            $stat = @stat($pt);
+            if ($stat) {
+                if (function_exists('posix_getpwuid')) {
+                    $pw = posix_getpwuid($stat['uid']);
+                    $ownerName = $pw['name'] ?? $stat['uid'];
+                } else {
+                    $ownerName = $stat['uid'];
+                }
+                if (function_exists('posix_getgrgid')) {
+                    $gr = posix_getgrgid($stat['gid']);
+                    $groupName = $gr['name'] ?? $stat['gid'];
+                } else {
+                    $groupName = $stat['gid'];
+                }
+                $perms = substr(sprintf('%o', $stat['mode']), -4);
+                $setuid = ($stat['mode'] & 04000) ? 1 : 0;
+                $setgid = ($stat['mode'] & 02000) ? 1 : 0;
+            }
+        }
+        $mounts[] = ['dev' => $mm[1], 'pt' => $pt, 'opts' => $mm[4], 'fstab' => $inFstab,
+                     'owner' => $ownerName, 'group' => $groupName,
+                     'perms' => $perms, 'setuid' => $setuid, 'setgid' => $setgid];
     } elseif (preg_match('/^(\S+) on (\/export\/\S+)/', $m, $mm)) {
         $pt = $mm[2];
         $inFstab = false;
@@ -494,7 +577,34 @@ foreach ($mnts as $m) {
                 break;
             }
         }
-        $mounts[] = ['dev' => $mm[1], 'pt' => $pt, 'opts' => '', 'fstab' => $inFstab];
+        $ownerName = '';
+        $groupName = '';
+        $perms = '';
+        $setuid = 0;
+        $setgid = 0;
+        if (is_dir($pt) || is_file($pt)) {
+            $stat = @stat($pt);
+            if ($stat) {
+                if (function_exists('posix_getpwuid')) {
+                    $pw = posix_getpwuid($stat['uid']);
+                    $ownerName = $pw['name'] ?? $stat['uid'];
+                } else {
+                    $ownerName = $stat['uid'];
+                }
+                if (function_exists('posix_getgrgid')) {
+                    $gr = posix_getgrgid($stat['gid']);
+                    $groupName = $gr['name'] ?? $stat['gid'];
+                } else {
+                    $groupName = $stat['gid'];
+                }
+                $perms = substr(sprintf('%o', $stat['mode']), -4);
+                $setuid = ($stat['mode'] & 04000) ? 1 : 0;
+                $setgid = ($stat['mode'] & 02000) ? 1 : 0;
+            }
+        }
+        $mounts[] = ['dev' => $mm[1], 'pt' => $pt, 'opts' => '', 'fstab' => $inFstab,
+                     'owner' => $ownerName, 'group' => $groupName,
+                     'perms' => $perms, 'setuid' => $setuid, 'setgid' => $setgid];
     }
 }
 // eliminate duplicate entries for the same mount point, keeping the last
@@ -537,15 +647,19 @@ if (count($mounts) === 0 && count($mnts) > 0) {
             <tr>
                 <th>Device</th>
                 <th>Mount point</th>
+                <th>Owner</th>
+                <th>Perms</th>
                 <th>Options</th>
                 <th>Action</th>
             </tr>
         </thead>
         <tbody>
         <?php foreach ($mounts as $m): ?>
-            <tr data-dev="<?php echo htmlspecialchars($m['dev']); ?>" data-pt="<?php echo htmlspecialchars($m['pt']); ?>" data-opts="<?php echo htmlspecialchars($m['opts'] ?? ''); ?>" data-infstab="<?php echo $m['fstab'] ? '1' : '0'; ?>">
+            <tr data-dev="<?php echo htmlspecialchars($m['dev']); ?>" data-pt="<?php echo htmlspecialchars($m['pt']); ?>" data-owner="<?php echo htmlspecialchars($m['owner'] ?? ''); ?>" data-group="<?php echo htmlspecialchars($m['group'] ?? ''); ?>" data-perms="<?php echo htmlspecialchars($m['perms'] ?? ''); ?>" data-setuid="<?php echo $m['setuid'] ? '1' : '0'; ?>" data-setgid="<?php echo $m['setgid'] ? '1' : '0'; ?>" data-opts="<?php echo htmlspecialchars($m['opts'] ?? ''); ?>" data-infstab="<?php echo $m['fstab'] ? '1' : '0'; ?>">
                 <td><?php echo htmlspecialchars($m['dev']); ?></td>
                 <td><?php echo htmlspecialchars($m['pt']); ?></td>
+                <td><?php echo htmlspecialchars(($m['owner'] ?? '') . ':' . ($m['group'] ?? '')); ?></td>
+                <td><?php echo htmlspecialchars($m['perms'] ?? ''); ?><?php if(!empty($m['setuid'])) echo ' (u+s)'; ?><?php if(!empty($m['setgid'])) echo ' (g+s)'; ?></td>
                 <td><?php echo htmlspecialchars($m['opts'] ?? ''); ?></td>
                 <td>
                     <form method="post" class="d-inline">
@@ -589,6 +703,26 @@ if (count($mounts) === 0 && count($mnts) > 0) {
                 <input name="mount_point" class="form-control" placeholder="myshare" required>
             </div>
             <div class="mb-3">
+                <label class="form-label">Owner</label>
+                <input name="mount_owner" class="form-control" placeholder="user">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Group</label>
+                <input name="mount_group" class="form-control" placeholder="group">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Permissions (octal)</label>
+                <input name="mount_perms" class="form-control" placeholder="0755">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="mount_setuid" id="mountSetuid">
+                    <label class="form-check-label" for="mountSetuid">setuid</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="mount_setgid" id="mountSetgid">
+                    <label class="form-check-label" for="mountSetgid">setgid</label>
+                </div>
+            </div>
+            <div class="mb-3">
                 <label class="form-label">Mount options</label>
                 <div class="d-flex flex-column">
                 <?php
@@ -630,6 +764,26 @@ if (count($mounts) === 0 && count($mnts) > 0) {
             <div class="mb-3">
                 <label class="form-label">Mount point</label>
                 <input name="mount_point" id="editMountPoint" class="form-control" readonly>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Owner</label>
+                <input name="mount_owner" id="editMountOwner" class="form-control">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Group</label>
+                <input name="mount_group" id="editMountGroup" class="form-control">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Permissions (octal)</label>
+                <input name="mount_perms" id="editMountPerms" class="form-control">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="mount_setuid" id="editMountSetuid">
+                    <label class="form-check-label" for="editMountSetuid">setuid</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="mount_setgid" id="editMountSetgid">
+                    <label class="form-check-label" for="editMountSetgid">setgid</label>
+                </div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Mount options</label>
