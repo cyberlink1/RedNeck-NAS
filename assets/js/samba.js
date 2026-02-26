@@ -55,7 +55,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (nameLabel) nameLabel.textContent = name;
                 modal.querySelector('#old_share').value = name;
                 modal.querySelector('#editShareNameInput').value = name;
-                modal.querySelector('#editSharePath').value = info['path'] || '';
+                var pathSelect = modal.querySelector('#editSharePath');
+                var curPath = info['path'] || '';
+                if (pathSelect) {
+                    // if the current share path was filtered out of the dropdown,
+                    // add it so the value can be set correctly
+                    if (curPath && !Array.from(pathSelect.options).some(o=>o.value===curPath)) {
+                        var opt = document.createElement('option');
+                        opt.value = curPath;
+                        opt.textContent = curPath;
+                        pathSelect.appendChild(opt);
+                    }
+                    pathSelect.value = curPath;
+                }
                 modal.querySelector('#editShareComment').value = info['comment'] || '';
                 var tb = modal.querySelector('.shareOptionTable tbody');
                 if (tb) {
