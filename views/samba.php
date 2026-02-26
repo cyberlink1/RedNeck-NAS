@@ -59,6 +59,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $section .= '# ' . $comment . "\n";
                 }
                 $section .= "[{$name}]\n\tpath = {$path}\n\tread only = no\n";
+                // include any options provided by the user
+                if (!empty($_POST['opt_name']) && is_array($_POST['opt_name'])) {
+                    foreach ($_POST['opt_name'] as $idx => $optname) {
+                        $optname = trim($optname);
+                        if ($optname === '') continue;
+                        $optval = trim($_POST['opt_val'][$idx] ?? '');
+                        if ($optval !== '') {
+                            $section .= "\t{$optname} = {$optval}\n";
+                        } else {
+                            $section .= "\t{$optname}\n";
+                        }
+                    }
+                }
                 $esc = escapeshellarg($section);
                 run_cmd("echo $esc | sudo -n tee -a $smbConf >/dev/null");
                 run_cmd('sudo -n systemctl restart smbd');
@@ -151,6 +164,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $skip = false;
             foreach ($lines as $line) {
                 if (preg_match('/^\s*\[' . preg_quote($name, '/') . '\]\s*$/', trim($line))) {
+                    // remove a single comment line immediately above this header
+                    if (!empty($new)) {
+                        $last = array_pop($new);
+                        if (!preg_match('/^\s*[#;]/', trim($last))) {
+                            // not a comment, put it back
+                            $new[] = $last;
+                        }
+                    }
                     $skip = true;
                     continue;
                 }
@@ -231,17 +252,17 @@ sort($shareDirs);
 ?>
 
 <?php if ($message): ?>
-    <div class="alert alert-info"><?php echo htmlspecialchars($message); ?></div>
+    <div id="initialMessage" class="d-none"><?php echo $message; ?></div>
 <?php endif; ?>
 
 <?php
 // list of common Samba share options for the pulldown; clients can still type
-// custom values thanks to the datalist element.  note that comment/path are
-// managed by the main form and therefore are excluded from this list.
+// custom values thanks to the datalist element.  note that path is
+// managed by the main form and therefore is excluded from this list.
 $allowedSmbOpts = [
     'read only','guest ok','browseable','valid users','writeable',
     'force user','force group','create mask','directory mask',
-    'vfs objects'
+    'vfs objects','comment'
 ];
 ?>
 <datalist id="shareOptionNames">
@@ -386,3 +407,36 @@ var sambaDirs = <?php echo json_encode($shareDirs, JSON_HEX_TAG|JSON_HEX_AMP); ?
 <?php
 // retain existing remove-share form/button handling still above
 ?>
+
+<!-- generic result modal used by JS -->
+<div class="modal fade" id="resultModal" tabindex="-1" aria-hidden="1">
+  <div class="modal-dialog">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Result</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body"></div>
+    <div class="modal-footer">
+       <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+    </div>
+   </div>
+  </div>
+</div>
+
+<!-- existing confirmation modal (used by JS) -->
+<div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+   <div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Notice</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body"></div>
+    <div class="modal-footer">
+       <button type="button" class="btn btn-primary btn-ok">OK</button>
+       <button type="button" class="btn btn-secondary btn-cancel ms-2" data-bs-dismiss="modal">Cancel</button>
+    </div>
+   </div>
+  </div>
+</div>
