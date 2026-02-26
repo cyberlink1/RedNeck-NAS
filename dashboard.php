@@ -252,6 +252,21 @@ if ($view === '') {
         NO CARRIER
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="assets/js/app.js"></script>
+    <script src="assets/js/functions.js"></script>
+<?php if (!empty($view)): ?>
+    <?php if ($view === 'disks'): ?>
+        <script src="assets/js/disks.js"></script>
+    <?php elseif ($view === 'raid'): ?>
+        <script src="assets/js/raid.js"></script>
+    <?php elseif ($view === 'lvm'): ?>
+        <script src="assets/js/lvm.js"></script>
+    <?php elseif ($view === 'mounts'): ?>
+        <script src="assets/js/mounts.js"></script>
+    <?php elseif ($view === 'nfs'): ?>
+        <script src="assets/js/nfs.js"></script>
+    <?php elseif ($view === 'samba'): ?>
+        <script src="assets/js/samba.js"></script>
+    <?php endif; ?>
+<?php endif; ?>
 </body>
 </html>

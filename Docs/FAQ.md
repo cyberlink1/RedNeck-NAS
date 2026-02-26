@@ -154,4 +154,4 @@
 
 **Q:** Can I customize the interface?  
 
-**A:** Yes. CSS and JS are in `assets/css/style.css` and `assets/js/app.js`. You can modify them or add themes.
+**A:** Yes. CSS lives in `assets/css/style.css` and JavaScript has been split between `assets/js/functions.js` (shared helpers) and per-view files such as `disks.js`, `raid.js`, `lvm.js`, `mounts.js`, `nfs.js` and `samba.js`. The old `app.js` is now deprecated.
