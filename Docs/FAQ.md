@@ -52,7 +52,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 5. Is it safe to expose RNN to the internet?
+### 6. Is it safe to expose RNN to the internet?
 
 **Q:** Is it safe to expose RNN to the internet?  
 
@@ -60,7 +60,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 6. Can I restrict specific users from performing destructive actions?
+### 7. Can I restrict specific users from performing destructive actions?
 
 **Q:** Can I restrict specific users from performing destructive actions?  
 
@@ -68,7 +68,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 7. Can I create RAID LVs directly through RNN?
+### 8. Can I create RAID LVs directly through RNN?
 
 **Q:** Can I create RAID LVs directly through RNN?  
 
@@ -76,7 +76,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 8. Does RNN format drives automatically?
+### 9. Does RNN format drives automatically?
 
 **Q:** Does RNN format drives automatically?  
 
@@ -84,7 +84,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 9. Can I manage existing arrays and volumes created outside RNN?
+### 10. Can I manage existing arrays and volumes created outside RNN?
 
 **Q:** Can I manage existing arrays and volumes created outside RNN?  
 
@@ -92,7 +92,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 10. Does RNN handle mounting at boot?
+### 11. Does RNN handle mounting at boot?
 
 **Q:** Does RNN handle mounting at boot?  
 
@@ -100,7 +100,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 11. When fstab is modified does systemd pick up the changes?
+### 12. When fstab is modified does systemd pick up the changes?
 
 **Q:** After RNN updates `/etc/fstab`, why doesn't `systemctl` recognize the change?  
 
@@ -108,21 +108,21 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 12. How are NFS exports managed?
+### 13. How are NFS exports managed?
 
 **Q:** How are NFS exports managed?  
 
 **A:** You can create, edit, and delete exports. RNN updates `/etc/exports` and runs `exportfs -ra`. Comments associated with export lines are also cleaned up.
 ---
 
-### 13. How are Samba shares managed?
+### 14. How are Samba shares managed\?
 
 **Q:** How are Samba shares managed\?  
 
 **A:** If Samba is installed, a “Samba Shares” view appears. Shares are listed in a table; click a row to open a modal that lets you rename, change the path, add a comment or specify arbitrary share options (key/value pairs such as `read only = yes`, `guest ok = yes`, etc.), or delete the share. New shares are created via a similar dialog. RNN updates `/etc/samba/smb.conf` and restarts `smbd` via `systemctl` after any change. The menu option and dashboard card only appear when the Samba daemon (`smbd`) is present on the host.
 ---
 
-### 12. Login fails even though my password is correct
+### 15. Login fails even though my password is correct
 
 **Q:** Login fails even though my password is correct  
 
@@ -130,7 +130,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 13. RNN cannot see my disks or arrays
+### 16. RNN cannot see my disks or arrays
 
 **Q:** RNN cannot see my disks or arrays  
 
@@ -138,7 +138,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 14. I get permission errors when creating LVs or arrays
+### 17. I get permission errors when creating LVs or arrays
 
 **Q:** I get permission errors when creating LVs or arrays  
 
@@ -146,7 +146,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 15. How large is RNN?
+### 18. How large is RNN?
 
 **Q:** How large is RNN?  
 
@@ -154,7 +154,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 16. Can RNN run without a database or background services?
+### 19. Can RNN run without a database or background services?
 
 **Q:** Can RNN run without a database or background services?  
 
@@ -162,7 +162,7 @@ Reloading the page picks up any changes immediately.
 
 ---
 
-### 17. Can I customize the interface?
+### 20. Can I customize the interface?
 
 **Q:** Can I customize the interface?  
 

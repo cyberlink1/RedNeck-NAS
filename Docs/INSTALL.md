@@ -126,9 +126,7 @@ deploy the UI without touching packages and without enabling Apache.
     * `cookie_secure` / `base_url` for session and redirect handling
     * `exports_file` (usually `/etc/exports`)
   The installer scripts will create a template `config.php` if none exists and
-  update ownership/permissions; the file is git‑ignored so you can safely
-  tweak it locally.  When rerunning an installer, take care not to overwrite
-  your customised file (back it up first).
+  update ownership/permissions
 - **Samba shares:** if you also want the Samba view, install `samba` and
   restart the web server; the menu appears only when `smbd` is present.
 - **Upgrades:** redeploy by copying new files over the web root and ensuring

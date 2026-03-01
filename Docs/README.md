@@ -117,12 +117,10 @@ Finish installation and reboot.
 - Debian minimal does not install sudo by default.
 - su -
 - cd /home/(username where you uploaded repo)
-- ./install.sh
-After the web UI is deployed a `config.php` file will exist in the document
-root.  Edit this file to adjust mount base, login group, proxy settings, base
-URL, etc.  The installer writes a template and marks it git‑ignored so
-customisations survive updates; if you rerun the installer be sure to
-preserve your changes.- usermod -aG nfs youruser
+- ./install-v2.sh
+- After the web UI is deployed a `config.php` file will exist in the document root.  Edit this file to adjust mount base, login group, proxy settings, base
+URL, etc.  
+- usermod -aG nfs youruser
 - optionally install Samba (`apt install samba`) if you want the Samba Shares view (menu appears only when `smbd` is present); you can configure share options via the UI
 - open browser to http://server-ip/
 
