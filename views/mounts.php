@@ -18,7 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // handle mount/unmount
     if (isset($_POST['mount_lv'])) {
         $dev = escapeshellarg($_POST['device_select_mount']);
-        $mp = '/export/' . trim($_POST['mount_point']);
+        $mp = rtrim(mount_root(), '/') . '/' . trim($_POST['mount_point']);
         $mpEsc = escapeshellarg($mp);
 
         // collect options if any
@@ -292,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif (isset($_POST['edit_mount'])) {
         // modify existing mount options and adjust /etc/fstab
         $dev = escapeshellarg($_POST['device']);
-        $mp  = '/export/' . trim($_POST['mount_point']);
+        $mp  = rtrim(mount_root(), '/') . '/' . trim($_POST['mount_point']);
         $mpEsc = escapeshellarg($mp);
 
         // collect requested options
@@ -454,14 +454,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // gather logical volumes (still used for other views)
 $lvs = run_cmd('sudo lvs --noheadings -o lv_path');
-// gather current /export mounts for unmount dropdown
+// gather current mounts under the configured mount base for unmount dropdown
 
 // when querying mounts we prefer the host namespace if possible so that
 // the table accurately reflects what the system sees rather than whatever
 // namespace PHP happens to be in.
-$mnts = run_cmd(nsCmd("mount | grep ' on /export/'"));
-// strip the lone "(exit N)" line grep prints when there are no matches
-$mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
+
+$root = mount_root();
+// match lines containing " on <root>" (singular or plural); the helper
+// already handles the optional trailing 's'.
+$onRegex = '# on ' . preg_quote($root, '#') . 's?(?:/|$)#';
+$all = run_cmd(nsCmd("mount"));
+$mnts = array_values(array_filter($all, fn($l)=> preg_match($onRegex, $l)));
 
 // determine candidate devices for the mount modal: any device with a filesystem
 // (as reported by blkid) that is not already mounted, not the OS root device,
@@ -551,7 +555,7 @@ if (file_exists($fstabPath)) {
 $mounts = [];
 foreach ($mnts as $m) {
     // capture device, point, type and options if present
-    if (preg_match('/^(\S+) on (\/export\/\S+) type (\S+) \(([^)]+)\)/', $m, $mm)) {
+    if (preg_match('/^(\S+) on (' . preg_quote(mount_root(), '/') . '\S+) type (\S+) \(([^)]+)\)/', $m, $mm)) {
         $pt = $mm[2];
         $inFstab = false;
         foreach ($fstabLines as $line) {
@@ -589,7 +593,7 @@ foreach ($mnts as $m) {
         $mounts[] = ['dev' => $mm[1], 'pt' => $pt, 'opts' => $mm[4], 'fstab' => $inFstab,
                      'owner' => $ownerName, 'group' => $groupName,
                      'perms' => $perms, 'setuid' => $setuid, 'setgid' => $setgid];
-    } elseif (preg_match('/^(\S+) on (\/export\/\S+)/', $m, $mm)) {
+    } elseif (preg_match('/^(\S+) on (' . preg_quote(mount_root(), '/') . '\S+)/', $m, $mm)) {
         $pt = $mm[2];
         $inFstab = false;
         foreach ($fstabLines as $line) {
@@ -655,7 +659,7 @@ if (count($mounts) === 0 && count($mnts) > 0) {
 
 <div class="row mb-3 align-items-center">
     <div class="col">
-        <h5>Existing /export mounts</h5>
+        <h5>Existing <?= htmlentities(mount_root(), ENT_QUOTES) ?> mounts</h5>
     </div>
     <div class="col text-end">
         <button id="btnShowMountModal" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createMountModal">Create mount</button>
@@ -720,7 +724,7 @@ if (count($mounts) === 0 && count($mnts) > 0) {
                 </select>
             </div>
             <div class="mb-3">
-                <label class="form-label">Mount point (subdir under /export)</label>
+                <label class="form-label">Mount point (subdir under <?= htmlentities(mount_root(), ENT_QUOTES) ?>)</label>
                 <input name="mount_point" class="form-control" placeholder="myshare" required>
             </div>
             <div class="mb-3">

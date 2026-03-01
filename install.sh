@@ -86,6 +86,36 @@ rm -r "$WEBROOT/.git" "$WEBROOT/.github" 2>/dev/null || true
 rm -r "$WEBROOT/*.md" "$WEBROOT/*.txt" 2>/dev/null || true
 rm -r "$WEBROOT/*.sh" 2>/dev/null || true
 
+# ensure there is a configuration file; if it doesn't exist create a
+# template with reasonable defaults.  The file is owned by the web user and
+# is ignored by git, so site customizations won't be accidentally committed.
+CONFIG_FILE="$WEBROOT/config.php"
+if [ ! -e "$CONFIG_FILE" ]; then
+    echo "creating default config.php in ${WEBROOT}"
+    cat <<'EOF' > "$CONFIG_FILE"
+<?php
+// See config.php in the repository root for documentation; adjust values
+// here or copy your own config.php and add it to .gitignore.
+
+/* default configuration exported by installer */
+$CONFIG = [];
+$CONFIG['mount_base'] = '/export';
+$CONFIG['login_group'] = 'nfs';
+$CONFIG['trusted_proxies'] = [];
+$CONFIG['proxy_header_scheme'] = 'X-Forwarded-Proto';
+$CONFIG['proxy_header_host'] = 'X-Forwarded-Host';
+$CONFIG['cookie_secure'] = false;
+$CONFIG['exports_file'] = '/etc/exports';
+$CONFIG['base_url'] = '';
+EOF
+    chown www-data:www-data "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+else
+    # existing file: ensure permissions are sane
+    chown www-data:www-data "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+fi
+
 cat <<'EOF'
 
 Installation complete.

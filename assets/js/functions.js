@@ -1,4 +1,29 @@
 // common helper functions shared across all views
+// configuration object is injected by PHP before this file is loaded.  it
+// lives in `window.CONFIG` and serves as the single point of truth for any
+// settings that might change per‑site.  use the helper `cfg(name,def)` to
+// access values safely; callers are responsible for any type coercion.
+
+// start with a sensible default for BASE_URL but allow the PHP template to
+// override it via CONFIG.baseUrl.  existing code relied on window.BASE_URL so
+// we keep that name here for backwards compatibility.
+window.BASE_URL = (window.CONFIG && window.CONFIG.baseUrl) || window.BASE_URL || '';
+
+// convenience accessor for config values from JS
+function cfg(key, def) {
+    if (window.CONFIG && Object.prototype.hasOwnProperty.call(window.CONFIG, key)) {
+        return window.CONFIG[key];
+    }
+    return def;
+}
+
+// convenience for building an absolute path
+function withBase(path) {
+    if (window.BASE_URL && path.charAt(0) !== '/') {
+        return window.BASE_URL.replace(/\/+$/,'') + '/' + path;
+    }
+    return window.BASE_URL ? window.BASE_URL.replace(/\/+$/,'') + path : path;
+}
 
 // global cache for filesystem types (populated on DOMContentLoaded)
 window.cachedFsTypes = window.cachedFsTypes || [];
@@ -26,7 +51,7 @@ document.addEventListener('submit', function(e) {
 function fetchAuth(input, init) {
     return fetch(input, init).then(function(resp) {
         if (resp.status === 401) {
-            window.location = 'login.php';
+            window.location = withBase('login.php');
             return Promise.reject(new Error('unauthorized'));
         }
         return resp;

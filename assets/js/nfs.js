@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', function(e) {
             e.preventDefault();
             var form = btn.closest('form');
-            showConfirmation('Remove this export entry? This will update /etc/exports.', function() {
+            showConfirmation('Remove this export entry? This will update ' + (window.CONFIG && window.CONFIG.exportsFile ? window.CONFIG.exportsFile : '/etc/exports') + '.', function() {
                 form.submit();
             });
         });
@@ -258,7 +258,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 e.preventDefault();
                 var orig = editForm.orig_line.value.trim();
                 if (!orig) return;
-                showConfirmation('Delete this export entry? This will remove the entire export from /etc/exports.', function() {
+                showConfirmation('Delete this export entry? This will remove the entire export from ' + (window.CONFIG && window.CONFIG.exportsFile ? window.CONFIG.exportsFile : '/etc/exports') + '.', function() {
                     editForm.remove_export.value = orig;
                     editForm.submit();
                 });

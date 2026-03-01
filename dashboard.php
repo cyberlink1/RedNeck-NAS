@@ -68,21 +68,24 @@ if ($view === '') {
         }
     }
     $lvs = $filteredLvs;
-    // determine mounts under /export or /exports by inspecting the host mount
-    // table. fallback to nsenter+grep if /proc/1/mounts isn't readable.
+    // determine mounts under the configured mount base (singular or
+    // plural).  use the helper so behaviour stays in sync with other code.
     $mnts = [];
+    $root = mount_root();
+    $regex = mount_root_regex();
+    // prefer reading /proc/1/mounts to avoid extra shell calls
     if (file_exists('/proc/1/mounts')) {
         $lines = file('/proc/1/mounts', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         foreach ($lines as $l) {
             $fields = preg_split('/\s+/', trim($l));
-            if (isset($fields[1]) && preg_match('#^/exports?(?:/|$)#', $fields[1])) {
+            if (isset($fields[1]) && preg_match($regex, $fields[1])) {
                 $mnts[] = $l;
             }
         }
     } else {
-        $mnts = run_cmd(nsCmdDash("mount | grep -E ' on /exports?(?:/|$)'"));
-        // strip the lone "(exit N)" record that grep emits when nothing matched
-        $mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/', $l)));
+        // fallback via nsenter and mount output without grep; filter in PHP
+        $all = run_cmd(nsCmdDash("mount"));
+        $mnts = array_values(array_filter($all, fn($l) => preg_match($regex, $l)));
     }
 
     // count physical drives (lsblk shows TYPE column). we want to omit the
@@ -121,7 +124,7 @@ if ($view === '') {
     }
 
     // count exports ignoring comments/blank lines
-    $expFile = '/etc/exports';
+    $expFile = cfg('exports_file', '/etc/exports');
     if (file_exists($expFile)) {
         $lines = file($expFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         foreach ($lines as $l) {
@@ -158,6 +161,7 @@ if ($view === '') {
     <title>RNN (RedNeck NAS) Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/style.css">
+    <?php print_js_config(); ?>
 </head>
 <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">

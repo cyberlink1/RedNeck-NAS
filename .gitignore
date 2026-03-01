@@ -1,5 +1,8 @@
 # ignore deployment script, should not be committed
 deploy.sh
 
+# ignore site-specific configuration; copy or customize config.php
+config.php
+
 # ignore ToDo directory
 ToDo/

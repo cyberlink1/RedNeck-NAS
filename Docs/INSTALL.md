@@ -117,6 +117,18 @@ deploy the UI without touching packages and without enabling Apache.
 ## 3. Post‑Installation Notes
 
 - **Firewall:** open ports 80/443 (HTTP/HTTPS) and 22 (SSH) as appropriate.
+- **Site configuration:** a `config.php` file in the web root controls various
+  runtime settings (see `config.php` for full documentation).  Common options
+  include:
+    * `mount_base` – root directory for exported filesystems (default `/export`)
+    * `login_group` – UNIX group allowed to authenticate (default `nfs`)
+    * `trusted_proxies`, `proxy_header_*` – configure reverse‑proxy support
+    * `cookie_secure` / `base_url` for session and redirect handling
+    * `exports_file` (usually `/etc/exports`)
+  The installer scripts will create a template `config.php` if none exists and
+  update ownership/permissions; the file is git‑ignored so you can safely
+  tweak it locally.  When rerunning an installer, take care not to overwrite
+  your customised file (back it up first).
 - **Samba shares:** if you also want the Samba view, install `samba` and
   restart the web server; the menu appears only when `smbd` is present.
 - **Upgrades:** redeploy by copying new files over the web root and ensuring

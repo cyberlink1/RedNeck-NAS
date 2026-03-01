@@ -6,7 +6,142 @@ ini_set('display_errors', '1');
 ini_set('display_startup_errors', '1');
 error_reporting(E_ALL);
 
-session_start();
+// load site configuration; file may be under version control or a
+// local override (see config.php comments).  if the file is missing we
+// populate a minimal set of defaults so that callers can safely use
+// cfg() without additional guards.
+$CONFIG = [];
+$configFile = __DIR__ . '/config.php';
+if (file_exists($configFile)) {
+    require_once $configFile;
+} else {
+    // fallback defaults mirror the values documented in the template
+    $CONFIG['mount_base'] = '/export';
+    $CONFIG['login_group'] = 'nfs';
+    $CONFIG['trusted_proxies'] = [];
+    $CONFIG['proxy_header_scheme'] = 'X-Forwarded-Proto';
+    $CONFIG['proxy_header_host'] = 'X-Forwarded-Host';
+    $CONFIG['cookie_secure'] = false;
+    $CONFIG['base_url'] = '';
+    $CONFIG['exports_file'] = '/etc/exports';
+}
+
+// adjust request metadata according to trusted proxy headers before doing
+// anything that might depend on the client's address or scheme.
+normalize_request();
+
+// start a session with configured cookie parameters
+init_session();
+
+// normalize proxy headers if we’re behind a trusted proxy
+function normalize_request(): void {
+    $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+    foreach (cfg('trusted_proxies', []) as $net) {
+        if (ip_in_cidr($remote, $net)) {
+            if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+                $parts = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+                $_SERVER['REMOTE_ADDR'] = trim($parts[0]);
+            }
+            $schemeHeader = cfg('proxy_header_scheme', 'X-Forwarded-Proto');
+            $httpName = 'HTTP_' . strtoupper(str_replace('-', '_', $schemeHeader));
+            if (!empty($_SERVER[$httpName])) {
+                $scheme = strtolower($_SERVER[$httpName]);
+                if ($scheme === 'https' || $scheme === 'http') {
+                    $_SERVER['REQUEST_SCHEME'] = $scheme;
+                    $_SERVER['HTTPS'] = $scheme === 'https' ? 'on' : 'off';
+                }
+            }
+            $hostHeader = cfg('proxy_header_host', 'X-Forwarded-Host');
+            $httpHost = 'HTTP_' . strtoupper(str_replace('-', '_', $hostHeader));
+            if (!empty($_SERVER[$httpHost])) {
+                $_SERVER['HTTP_HOST'] = $_SERVER[$httpHost];
+            }
+            break;
+        }
+    }
+}
+
+function ip_in_cidr(string $ip, string $cidr): bool {
+    if (strpos($cidr, '/') === false) {
+        return $ip === $cidr;
+    }
+    list($network, $mask) = explode('/', $cidr, 2);
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)
+        && filter_var($network, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        $ip = ip2long($ip);
+        $network = ip2long($network);
+        $mask = ~((1 << (32 - intval($mask))) - 1);
+        return ($ip & $mask) === ($network & $mask);
+    }
+    return false; // IPv6 not yet supported
+}
+
+function init_session(): void {
+    if (!empty($GLOBALS['CONFIG']['cookie_secure'])) {
+        $params = session_get_cookie_params();
+        $params['secure'] = true;
+        if ($GLOBALS['CONFIG']['cookie_secure'] === 'strict') {
+            $params['samesite'] = 'Strict';
+        }
+        session_set_cookie_params($params);
+    }
+    session_start();
+}
+
+function mount_root(): string {
+    $base = cfg('mount_base', '/export');
+    return '/' . trim($base, '/');
+}
+
+function mount_root_regex(): string {
+    $root = mount_root();
+    if (substr($root, -1) !== 's') {
+        return '#^' . preg_quote($root, '#') . 's?(?:/|$)#';
+    }
+    return '#^' . preg_quote($root, '#') . '(?:/|$)#';
+}
+
+// convenience accessor for configuration values
+function cfg(string $key, $default = null) {
+    global $CONFIG;
+    return $CONFIG[$key] ?? $default;
+}
+
+// build a URL optionally prefixed with base_url from configuration
+function url(string $path): string {
+    $base = cfg('base_url', '');
+    if ($base !== '') {
+        // ensure exactly one slash between base and path
+        return rtrim($base, '/') . '/' . ltrim($path, '/');
+    }
+    return $path;
+}
+
+// helper to emit a small JavaScript snippet exposing configuration values
+// to client‑side code.  This is called from pages such as login.php and
+// the dashboard header; the script creates `window.CONFIG` and sets
+// `window.BASE_URL` so existing JS helpers continue to work.
+function print_js_config(): void {
+    $data = [
+        'mountBase'   => mount_root(),
+        'exportsFile' => cfg('exports_file', '/etc/exports'),
+        'baseUrl'     => cfg('base_url', ''),
+    ];
+    echo "<script>\n";
+    echo "window.CONFIG = window.CONFIG || {};\n";
+    foreach ($data as $k => $v) {
+        echo "window.CONFIG[" . json_encode($k) . "] = " . json_encode($v) . ";\n";
+    }
+    // also mirror baseUrl as BASE_URL for legacy helpers
+    echo "window.BASE_URL = window.CONFIG.baseUrl || '';\n";
+    echo "</script>\n";
+}
+
+// send a redirect using url(); exits after issuing header
+function redirect(string $path): void {
+    header('Location: ' . url($path));
+    exit;
+}
 
 // hold a human-readable error from the last authentication attempt
 $lastAuthError = '';
@@ -70,8 +205,9 @@ function authenticate(string $user, string $password): bool
     // verify using PHP's crypt()
     $computed = @crypt($password, $hash);
     if ($computed === $hash) {
-        // successful password; enforce nfs group membership
-        if (!user_in_group($user, 'nfs')) {
+        // successful password; enforce configured login group membership
+        $group = cfg('login_group', 'nfs');
+        if (!user_in_group($user, $group)) {
             $lastAuthError = "user $user is not authorized to use this interface";
             log_auth_failure($user, $lastAuthError);
             return false;
@@ -100,7 +236,8 @@ function authenticate(string $user, string $password): bool
             'output' => $out,
         ];
         if ($st === 0 && count($out) > 0 && trim($out[0]) === $hash) {
-            if (!user_in_group($user, 'nfs')) {
+            $group = cfg('login_group', 'nfs');
+            if (!user_in_group($user, $group)) {
                 $lastAuthError = "user $user is not authorized to use this interface";
                 log_auth_failure($user, $lastAuthError);
                 return false;
@@ -124,7 +261,8 @@ function authenticate(string $user, string $password): bool
         ];
         // pamtester returns 0 on success
         if ($st === 0) {
-            if (!user_in_group($user, 'nfs')) {
+            $group = cfg('login_group', 'nfs');
+            if (!user_in_group($user, $group)) {
                 $lastAuthError = "user $user is not authorized to use this interface";
                 log_auth_failure($user, $lastAuthError);
                 return false;
@@ -165,7 +303,8 @@ function require_login()
         exit;
     }
     // if membership was revoked while session active, treat as logged out
-    if (!user_in_group($_SESSION['user'], 'nfs')) {
+    $group = cfg('login_group', 'nfs');
+    if (!user_in_group($_SESSION['user'], $group)) {
         session_destroy();
         if ($isAjax) {
             header('HTTP/1.1 401 Unauthorized');

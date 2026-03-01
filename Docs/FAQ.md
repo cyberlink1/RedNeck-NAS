@@ -34,9 +34,21 @@
 
 ### 4. How does authentication work?
 
-**Q:** How does authentication work?  
+**Q:** How does authentication work\\?  
 
 **A:** RNN uses system users (`/etc/passwd` and `/etc/shadow`). Only users in the `nfs` group can log in.
+
+---
+
+### 5. Where do I change default paths and other settings?
+
+**Q:** Where is the configuration for mount base, proxy headers, etc.?
+
+**A:** Look at `config.php` in the web root.  The installer will drop a
+template there with sensible defaults; you can edit it and, if you use git,
+add it to `.gitignore` so your site‑specific settings aren’t committed.  Key
+settings include `mount_base`, `login_group`, `base_url`, and `exports_file`.
+Reloading the page picks up any changes immediately.
 
 ---
 

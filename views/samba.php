@@ -1,5 +1,7 @@
 <?php
 // Samba shares management view. Authentication already handled in dashboard.php
+// Configuration from config.php is available; mount points and paths are
+// computed using mount_root() so the `mount_base` setting can change.
 $message = '';
 $smbConf = '/etc/samba/smb.conf';
 
@@ -219,7 +221,7 @@ foreach ($raw as $line) {
     $lastComment = '';
 }
 
-// gather list of candidate directories under /export that are actual mount points
+// gather list of candidate directories under the configured mount base that are actual mount points
 // so we can offer them in the create/edit dialogs; reuse helpers from nfs view
 $shareDirs = [];
 $nsenterAvailable = file_exists('/usr/bin/nsenter');
@@ -230,10 +232,13 @@ function nsCmdSamba($cmd) {
     }
     return $cmd;
 }
-$mnts = run_cmd(nsCmdSamba("mount | grep ' on /export/'"));
-$mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/',$l)));
+
+$root = mount_root();
+$onRegex = '# on ' . preg_quote($root, '#') . 's?(?:/|$)#';
+$all = run_cmd(nsCmdSamba("mount"));
+$mnts = array_values(array_filter($all, fn($l) => preg_match($onRegex, $l)));
 foreach ($mnts as $m) {
-    if (preg_match('/ on (\/export\/\S+)/', $m, $mm)) {
+    if (preg_match('# on (' . preg_quote(mount_root(), '#') . '(?:s?/\S+)?)#', $m, $mm)) {
         $shareDirs[] = $mm[1];
     }
 }

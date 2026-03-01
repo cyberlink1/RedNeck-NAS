@@ -35,7 +35,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (titleElt) {
                     titleElt.textContent = 'Edit mount ' + dev;
                 }
-                form.mount_point.value = pt.replace(/^\/export\//, '');
+                var base = (window.CONFIG && window.CONFIG.mountBase) ? window.CONFIG.mountBase : '/export';
+                // escape for regex
+                var esc = base.replace(/[-\/\\^$*+?.()|[\]{}]/g,'\\$&');
+                form.mount_point.value = pt.replace(new RegExp('^' + esc + '/'), '');
                 // owner/group
                 form.mount_owner.value = row.dataset.owner || '';
                 form.mount_group.value = row.dataset.group || '';
@@ -90,7 +93,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (dev) {
                 msg = 'Mount ' + dev + '?';
             }
-            msg += '\nThis will create or use /export/' + (sub ? sub : '<em>subdir</em>') + '.\nYou may also specify owner/group and permissions for the directory; if omitted the default nobody:nogroup and standard modes are used.';
+            var baseMsg = (window.CONFIG && window.CONFIG.mountBase) ? window.CONFIG.mountBase : '/export';
+            msg += '\nThis will create or use ' + baseMsg + '/' + (sub ? sub : '<em>subdir</em>') + '.\nYou may also specify owner/group and permissions for the directory; if omitted the default nobody:nogroup and standard modes are used.';
             showConfirmation(msg, function() {
                 if (!mountBtn.form.querySelector('input[name="mount_lv"]')) {
                     var hid = document.createElement('input');

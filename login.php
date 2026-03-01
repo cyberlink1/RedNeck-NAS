@@ -1,4 +1,6 @@
 <?php
+// login page – configuration and helpers are loaded by functions.php
+// which calls normalize_request() early to honour trusted proxy headers.
 require_once 'functions.php';
 
 $err = '';
@@ -6,8 +8,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $user = $_POST['user'] ?? '';
     $pass = $_POST['pass'] ?? '';
     if (authenticate($user, $pass)) {
-        header('Location: dashboard.php');
-        exit;
+        // redirect uses url() which prepends base_url if configured
+        redirect('dashboard.php');
     } else {
         global $lastAuthError;
         // always display a simple failure message; log specifics separately
@@ -18,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?>
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -25,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <title>Login</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/style.css">
+    <?php print_js_config(); ?>
     <script defer src="assets/js/functions.js"></script>
     <style>
     /* ensure switch is visible in dark mode on login page */
@@ -49,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php if ($err): ?>
                             <div class="alert alert-danger"><?php echo htmlspecialchars($err); ?></div>
                         <?php endif; ?>
-                        <form method="post">
+                        <form method="post" action="<?php echo htmlspecialchars(url('login.php')); ?>">
                             <div class="mb-3">
                                 <label for="user" class="form-label">Username</label>
                                 <input type="text" class="form-control" id="user" name="user" required>

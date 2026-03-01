@@ -1,5 +1,14 @@
 // General JS helpers
 // App script loaded (debug logs removed)
+// configuration object (`window.CONFIG`) is injected by PHP; use the
+// `cfg(key, default)` helper to read values safely.
+function cfg(key, def) {
+    if (window.CONFIG && Object.prototype.hasOwnProperty.call(window.CONFIG, key)) {
+        return window.CONFIG[key];
+    }
+    return def;
+}
+
 
 // spinner handling – overlay is hidden by default, toggled by adding/removing
 // the "show" class (see assets/css/style.css).  In addition we hook the
@@ -31,7 +40,7 @@ function fetchAuth(input, init) {
         if (resp.status === 401) {
             // session expired – redirect to login page so the user can re‑auth.
             // the 401 status is returned by require_login() for AJAX requests.
-            window.location = 'login.php';
+            window.location = withBase('login.php');
             return Promise.reject(new Error('unauthorized'));
         }
         return resp;
@@ -301,8 +310,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (titleElt) {
                     titleElt.textContent = 'Edit mount ' + dev;
                 }
-                // strip leading /export/ from mount point for display
-                form.mount_point.value = pt.replace(/^\/export\//, '');
+                // strip leading mount base from mount point for display
+                var base = (window.CONFIG && window.CONFIG.mountBase) ? window.CONFIG.mountBase : '/export';
+                var esc = base.replace(/[-\/\\^$*+?.()|[\]{}]/g,'\\$&');
+                form.mount_point.value = pt.replace(new RegExp('^' + esc + '/'), '');
                 form.mount_boot.checked = inFstab;
                 // set option checkboxes
                 form.querySelectorAll('input[name="mount_opts[]"]').forEach(function(cb) {
@@ -318,7 +329,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', function(e) {
             e.preventDefault();
             var form = btn.closest('form');
-            showConfirmation('Remove this export entry? This will update /etc/exports.', function() {
+            showConfirmation('Remove this export entry? This will update ' + (window.CONFIG && window.CONFIG.exportsFile ? window.CONFIG.exportsFile : '/etc/exports') + '.', function() {
                 form.submit();
             });
         });
@@ -1915,7 +1926,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 e.preventDefault();
                 var orig = editForm.orig_line.value.trim();
                 if (!orig) return;
-                showConfirmation('Delete this export entry? This will remove the entire export from /etc/exports.', function() {
+                showConfirmation('Delete this export entry? This will remove the entire export from ' + (window.CONFIG && window.CONFIG.exportsFile ? window.CONFIG.exportsFile : '/etc/exports') + '.', function() {
                     editForm.remove_export.value = orig;
                     editForm.submit();
                 });

@@ -1,7 +1,7 @@
 <?php
 // NFS exports management view. Authentication already handled.
 $message = '';
-$exportsPath = '/etc/exports';
+$exportsPath = cfg('exports_file', '/etc/exports');
 
 function read_exports(): array {
     global $exportsPath;
@@ -231,13 +231,17 @@ function nsCmd($cmd) {
     }
     return $cmd;
 }
-// gather list of candidate directories under /export that are actual mount points
+// gather list of candidate directories under the configured mount base
+// that are actual mount points
 $exportDirs = [];
-$mnts = run_cmd(nsCmd("mount | grep ' on /export/'"));
-// strip any solitary "(exit N)" lines emitted by grep
-$mnts = array_values(array_filter($mnts, fn($l)=>!preg_match('/^\(exit \d+\)$/',$l)));
+
+$root = mount_root();
+$onRegex = '# on ' . preg_quote($root, '#') . 's?(?:/|$)#';
+$all = run_cmd(nsCmd("mount"));
+$mnts = array_values(array_filter($all, fn($l) => preg_match($onRegex, $l)));
 foreach ($mnts as $m) {
-    if (preg_match('/ on (\/export\/\S+)/', $m, $mm)) {
+    // capture the mount path under the configured root
+    if (preg_match('# on (' . preg_quote(mount_root(), '#') . '(?:s?/\S+)?)#', $m, $mm)) {
         $exportDirs[] = $mm[1];
     }
 }
