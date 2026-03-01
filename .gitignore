@@ -1,2 +1,5 @@
 # ignore deployment script, should not be committed
 deploy.sh
+
+# ignore ToDo directory
+ToDo/
