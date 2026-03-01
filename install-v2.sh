@@ -60,7 +60,7 @@ else
 
     # warn about changes before proceeding
     echo
-    echo "The script will now copy UI files into '$WEBROOT' and create/overwrite"
+    echo "The script will now copy UI files into '$WEBROOT' and create"
     echo "the sudoers file at '$SUDOERS_FILE'."
     read -p "Continue with these changes? (y/N): " cont
     case "$cont" in
@@ -81,9 +81,14 @@ if ! getent group nfs &>/dev/null; then
     groupadd nfs
 fi
 
-# write sudoers drop‑in
-cat <<'EOFS' > "$SUDOERS_FILE"
-# sudo permissions for NFS/LVM web interface
+# write sudoers drop‑in (append to avoid clobbering existing rules)
+if [ -e "$SUDOERS_FILE" ]; then
+    echo "note: $SUDOERS_FILE already exists, appending new rules."
+else
+    touch "$SUDOERS_FILE"
+fi
+cat <<'EOFS' >> "$SUDOERS_FILE"
+# sudo permissions for RNN web interface
 # allow systemctl so the UI can reload systemd after fstab edits
 Defaults:$WWWUSER !requiretty
 $WWWUSER ALL=(ALL) NOPASSWD: \
@@ -91,10 +96,10 @@ $WWWUSER ALL=(ALL) NOPASSWD: \
     /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, \
     /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, \
     /sbin/pvcreate, /sbin/pvremove, /sbin/pvck, /sbin/pvrepair, /sbin/pvdisplay, /sbin/pvresize, /sbin/pvmove, \
-    /sbin/vgs, /sbin/lvs, \
-    /sbin/exportfs, /usr/sbin/exportfs, /usr/bin/lsblk, /usr/bin/mkfs*, \
-    /sbin/mkfs*, /usr/sbin/mkfs*, /usr/sbin/blkid, /bin/mount, /bin/umount, \
-    /bin/mkdir, /bin/rmdir, /bin/chown, /bin/chmod, /usr/sbin/parted, /usr/sbin/sgdisk, \
+    /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/sbin/exportfs, \
+    /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, \
+    /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/rmdir, \
+    /bin/chown, /bin/chmod, /usr/sbin/parted, /usr/sbin/sgdisk, \
     /usr/sbin/smartctl, /usr/sbin/wipefs, /usr/bin/tee, /usr/bin/pamtester, \
     /usr/bin/python3, /usr/bin/perl, /bin/echo, /bin/cat, /bin/grep, \
     /bin/mv, /bin/systemctl*
@@ -104,7 +109,7 @@ $WWWUSER ALL=(ALL) NOPASSWD: /usr/bin/getent shadow *
 EOFS
 chmod 440 "$SUDOERS_FILE"
 
-echo "Sudoers entry written to $SUDOERS_FILE"
+echo "Sudoers entry appended to $SUDOERS_FILE"
 
 # deploy web UI files to the chosen document root
 echo "deploying web files to ${WEBROOT}"
