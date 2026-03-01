@@ -131,7 +131,7 @@ if [ -e "$SUDOERS_FILE" ]; then
 else
     touch "$SUDOERS_FILE"
 fi
-cat <<'EOFS' >> "$SUDOERS_FILE"
+cat <<EOFS >> "$SUDOERS_FILE"
 # sudo permissions for RNN web interface
 # allow systemctl so the UI can reload systemd after fstab edits
 Defaults:$WWWUSER !requiretty
