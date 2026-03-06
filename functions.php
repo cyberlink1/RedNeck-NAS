@@ -349,8 +349,24 @@ function run_cmd(string $cmd): array
     $output = [];
     $status = null;
     exec($cmd . ' 2>&1', $output, $status);
+
     if ($status !== 0) {
-        // include status line for debugging
+        // if the failure is due to sudo wanting a password, record a global
+        // warning and return no output so callers don’t accidentally treat the
+        // error text as legitimate data (which is what produced the spurious
+        // row in the LVM table).  Include the offending command and output so
+        // the administrator can tell which sudo rule is missing.
+        foreach ($output as $line) {
+            if (strpos($line, 'sudo:') !== false && stripos($line, 'password') !== false) {
+                $GLOBALS['SUDO_ERROR'] =
+                    'sudo requires a password for command: ' . htmlspecialchars($cmd) .
+                    ' (output: ' . htmlspecialchars(implode(' | ', $output)) . '); ' .
+                    'please configure passwordless sudo for the web server user ' .
+                    '(run the installer or update sudoers).';
+                return [];
+            }
+        }
+        // include status line for debugging if we didn’t bail out above
         $output[] = "(exit $status)";
     }
     return $output;

@@ -679,17 +679,43 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
                     <em>No disks found.</em>
                 <?php else: ?>
                     <?php
-                        // determine the OS disk by following root mount parent chain
+                        // determine the OS disk by following root mount parent chain.  we
+                        // have seen cases where lsblk emits error messages like
+                        // "lsblk: /dev/…: …" and those lines should not be treated as
+                        // device names; otherwise the parent-tracing loop will spin and
+                        // eventually build an enormous string that makes exec() fail.
                         $osDisk = '';
                         $rootLines = run_cmd('lsblk -nr -o NAME,MOUNTPOINT');
                         foreach ($rootLines as $l) {
-                            if (preg_match('/^(\S+)\s+\/\s*$/', trim($l), $m)) {
+                            $l = trim($l);
+                            if (preg_match('/^(\S+)\s+\/\s*$/', $l, $m)) {
                                 $rootName = $m[1];
+                                // only accept sane names (alphanumeric, no spaces/colons)
+                                if (!preg_match('/^[a-zA-Z0-9]+$/', $rootName)) {
+                                    continue;
+                                }
                                 $cur = $rootName;
+                                // follow parents until we either stop making progress or
+                                // encounter something that doesn’t look like a device name.
                                 while (true) {
+                                    // ask lsblk for the parent device name
                                     $parentLines = run_cmd('lsblk -nr -o PKNAME ' . escapeshellarg('/dev/'.$cur));
-                                    $parent = trim($parentLines[0] ?? '');
-                                    if ($parent === '' || $parent === $cur) break;
+                                    $parent = '';
+                                    foreach ($parentLines as $pl) {
+                                        $pl = trim($pl);
+                                        if (preg_match('/^[a-zA-Z0-9]+$/', $pl)) {
+                                            $parent = $pl;
+                                            break;
+                                        }
+                                    }
+                                    if ($parent === '' || $parent === $cur) {
+                                        break;
+                                    }
+                                    // avoid runaway loops by capping the length of the
+                                    // string we’re tracking
+                                    if (strlen($parent) > 100) {
+                                        break;
+                                    }
                                     $cur = $parent;
                                 }
                                 $osDisk = '/dev/' . $cur;
@@ -812,7 +838,7 @@ if (!empty($_GET['list_parts']) && !empty($_GET['disk'])) {
 </div>
 <!-- simple result modal for notifications (does *not* hide infoModal) -->
 <div class="modal fade" id="resultModal" tabindex="-1" aria-hidden="1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-xl">
    <div class="modal-content">
     <div class="modal-header">
       <h5 class="modal-title">Result</h5>

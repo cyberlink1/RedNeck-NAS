@@ -415,7 +415,7 @@ var sambaDirs = <?php echo json_encode($shareDirs, JSON_HEX_TAG|JSON_HEX_AMP); ?
 
 <!-- generic result modal used by JS -->
 <div class="modal fade" id="resultModal" tabindex="-1" aria-hidden="1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-xl">
    <div class="modal-content">
     <div class="modal-header">
       <h5 class="modal-title">Result</h5>

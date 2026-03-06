@@ -90,6 +90,10 @@ Reloading the page picks up any changes immediately.
 
 **A:** Yes. RNN detects existing MD RAID arrays and LVM volumes and allows management, formatting, and removal if appropriate.
 
+**Q:** The "Mounts" page title still reads "Existing /export mounts" even though I’ve set `mount_base` to something else in `config.php`.
+
+**A:** The header is generated dynamically from the current configuration value, so whatever the UI thinks the mount base is will be shown there. If the text doesn’t match what you’ve edited it means the running copy of `config.php` hasn’t been updated (the file in the repository may be different from the one deployed under the web root). Check the web‑server’s `config.php` (the same one that is included by `functions.php`) and make sure `$CONFIG['mount_base']` is set correctly; a mismatch will now also be flagged on the page itself for easier debugging.
+
 ---
 
 ### 11. Does RNN handle mounting at boot?

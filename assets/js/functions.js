@@ -58,6 +58,95 @@ function fetchAuth(input, init) {
     });
 }
 
+// helper used by disks/raid code when submitting forms via AJAX.  The
+// original implementation lived in the deprecated `app.js` file; after the
+// front-end modularisation this function was accidentally left behind which
+// meant none of the disk actions actually performed their AJAX requests.  We
+// now ship it in `functions.js` where the various view scripts can invoke it
+// directly.
+function submitDiskFormAjax(form) {
+    // whenever we start an AJAX disk operation show the spinner overlay so
+    // users see that something is happening; the fetch below runs
+    // asynchronously so the overlay might disappear only when the response
+    // arrives and we refresh the modal contents.  hideSpinner() will be called
+    // once we get a response or an error so the screen isn’t blocked
+    // indefinitely.
+    showSpinner();
+    var data = new FormData(form);
+    // ensure disk field is always sent (some browsers drop empty hidden inputs)
+    var diskInput = form.querySelector('input[name="disk"]');
+    if (diskInput && diskInput.value) {
+        data.set('disk', diskInput.value);
+    }
+    if (form._lastSubmitName) {
+        data.append(form._lastSubmitName, form._lastSubmitValue);
+    }
+    data.append('ajax', '1');
+    fetchAuth('views/disks.php', { method: 'POST', body: data })
+        .then(function(resp) { return resp.text(); })
+        .then(function(newHtml) {
+            // hide spinner as soon as we begin processing response
+            hideSpinner();
+            if (newHtml.trim() === '') {
+                // nothing returned – most likely the disk value was missing
+                showResult('Error: no response from server (disk may be unset)');
+                return;
+            }
+            // hide any submodal that might still be open
+            ['createPartModal','deletePartModal','formatPartModal'].forEach(function(id) {
+                var m = document.getElementById(id);
+                var inst = bootstrap.Modal.getInstance(m);
+                if (inst && m.classList.contains('show')) inst.hide();
+            });
+
+            // parse the returned HTML so we can inspect/strip special markers
+            var temp = document.createElement('div');
+            temp.innerHTML = newHtml;
+            var genericMsg = null;
+            // capture any bootstrap info alert text
+            var alertElt = temp.querySelector('.alert.alert-info');
+            if (alertElt) {
+                // use innerHTML so any <pre> or other markup is preserved when
+                // we later inject the message via showResult().  Previously we
+                // used textContent which stripped newlines and collapsed the
+                // SMART output into a single line.
+                genericMsg = alertElt.innerHTML.trim();
+                alertElt.remove();
+            }
+            var res = temp.querySelector('#formatResult');
+            var fmtOk, fmtMsg;
+            if (res) {
+                fmtOk = res.dataset.ok === '1';
+                fmtMsg = res.dataset.msg || (fmtOk ? 'Format completed.' : 'Format failed.');
+                res.remove();
+            }
+            newHtml = temp.innerHTML;
+
+            // update the preview first
+            showInfo(newHtml);
+
+            // then, if we had any result message, show it in the result modal
+            if (typeof fmtOk !== 'undefined' || genericMsg) {
+                var infoModal = document.getElementById('infoModal');
+                var doShow = function() { showResult(genericMsg || fmtMsg); };
+                if (infoModal && infoModal.classList.contains('show')) {
+                    doShow();
+                } else if (infoModal) {
+                    var handler = function() {
+                        infoModal.removeEventListener('shown.bs.modal', handler);
+                        doShow();
+                    };
+                    infoModal.addEventListener('shown.bs.modal', handler);
+                }
+            }
+        })
+        .catch(function(err) {
+            hideSpinner();
+            console.error('disk AJAX error', err);
+            showResult('Error communicating with server: ' + err.message);
+        });
+}
+
 // confirmation dialog utility ------------------------------------------------
 function showConfirmation(text, onOk, onCancel) {
     window._confirmActive = true;

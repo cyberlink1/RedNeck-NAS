@@ -23,8 +23,9 @@ function list_pvs() {
 // AJAX handler for returning PV details when rows are clicked.  The
 // disk/raid views already use a similar pattern; we call pvdisplay so
 // the administrator sees the same information they would get on the
-// command line.  Because pvdisplay isn’t currently covered by the sudoers
-// file we will update install.sh accordingly.
+// command line.  The installer (both install.sh and install-v2.sh) now
+// ensures pvdisplay and related tools are granted passwordless sudo, so
+// this should work out of the box.
 if (isset($_GET['ajax']) && isset($_GET['pv'])) {
     $pvPath = $_GET['pv'];
     // normalize name to start with /dev/
@@ -561,6 +562,12 @@ sort($fsTypes);
 <?php if ($message): ?>
     <div id="initialMessage" class="d-none"<?php if ($showVgAfter) echo ' data-reopen-vg="1"'; ?><?php if ($showLvAfter) echo ' data-reopen-lv="1"'; ?>><?php echo $message; ?></div>
 <?php endif; ?>
+
+<?php if (!empty($GLOBALS['SUDO_ERROR'])): ?>
+    <div class="alert alert-danger">
+        <strong>Permission problem:</strong> <?php echo htmlspecialchars($GLOBALS['SUDO_ERROR']); ?>
+    </div>
+<?php endif; ?>
 <!-- global spinner overlay -->
 <div id="spinnerOverlay">
     <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
@@ -1034,7 +1041,7 @@ sort($fsTypes);
 
 <!-- simple result modal for notifications (does *not* hide infoModal) -->
 <div class="modal fade" id="resultModal" tabindex="-1" aria-hidden="1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-xl">
    <div class="modal-content">
     <div class="modal-header">
       <h5 class="modal-title">Result</h5>

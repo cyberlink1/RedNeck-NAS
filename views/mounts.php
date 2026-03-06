@@ -39,10 +39,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // ensure mountpoint directory exists; capture any errors so we can report them
         // remember whether it existed before creation so we only adjust ownership
         // on newly-created paths (the export requirement only applies before a
-        // filesystem is mounted).
+        // filesystem is mounted).  ownership/perm changes performed here will be
+        // overwritten once the filesystem is mounted; we apply the user-specified
+        // values again after a successful mount below.
         $existed = is_dir($mp);
         $out = run_cmd("sudo -n /bin/mkdir -p $mpEsc");
-        // apply requested ownership/permissions if provided
+        // capture requested ownership/permissions for later
         $owner = trim($_POST['mount_owner'] ?? '');
         $group = trim($_POST['mount_group'] ?? '');
         // build perms from checkbox matrix
@@ -59,6 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $perms = $flag ? sprintf('%04o', $flag) : '';
         $setuid = !empty($_POST['mount_setuid']);
         $setgid = !empty($_POST['mount_setgid']);
+        // preliminary ownership/permissions only affect the empty mountpoint
         if (is_dir($mp)) {
             if ($owner !== '' || $group !== '') {
                 $spec = ($owner !== '' ? $owner : '') . ':' . ($group !== '' ? $group : '');
@@ -126,6 +129,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // already filtered on the point and the command we executed only
                     // mounted the selected LV.
                     $statusMsg = 'Mount succeeded';
+                    // apply ownership/permission changes inside the mounted filesystem
+                    if (($owner !== '' || $group !== '') || $perms !== '' || $setuid || $setgid) {
+                        if ($owner !== '' || $group !== '') {
+                            $spec = ($owner !== '' ? $owner : '') . ':' . ($group !== '' ? $group : '');
+                            run_cmd("sudo -n /bin/chown $spec $mpEsc");
+                        }
+                        if ($perms !== '') {
+                            run_cmd("sudo -n /bin/chmod " . escapeshellarg($perms) . " $mpEsc");
+                        }
+                        if ($setuid) {
+                            run_cmd("sudo -n /bin/chmod u+s $mpEsc");
+                        }
+                        if ($setgid) {
+                            run_cmd("sudo -n /bin/chmod g+s $mpEsc");
+                        }
+                    }
                     // rename variable for clarity
                     $lv = $dev; // keep old references in remaining code
                     // (optionally check visibility; no need to mention it in the message)
@@ -461,6 +480,13 @@ $lvs = run_cmd('sudo lvs --noheadings -o lv_path');
 // namespace PHP happens to be in.
 
 $root = mount_root();
+// determine where the OS root device actually comes from; fall back to
+// empty if findmnt fails.  dashboard.php performs the same computation but
+// mounts.php previously relied on $rootSrc being set by the caller, which
+// isn't guaranteed (and didn't work on the RedHat system). compute it here
+// so the mount filtering logic is self-contained.
+$rootSrc = run_cmd("findmnt -n -o SOURCE /");
+
 // match lines containing " on <root>" (singular or plural); the helper
 // already handles the optional trailing 's'.
 $onRegex = '# on ' . preg_quote($root, '#') . 's?(?:/|$)#';
@@ -476,26 +502,76 @@ $mnts = array_values(array_filter($all, fn($l)=> preg_match($onRegex, $l)));
 // all /dev/md* candidates were excluded. it also didn’t filter out array
 // member disks, so you could attempt to mount /dev/sdb1 even though the real
 // filesystem lived on /dev/md0.
-$fsDevices = run_cmd('sudo blkid -o device');
-$mounted = run_cmd(nsCmd("mount | awk '{print $1}'"));
-$mountSet = array_map('trim', $mounted);
 
-// compute root device and its parent disk name
+// devices which appear to have a filesystem according to blkid. some
+// distributions (or versions of blkid) may not support "-o device" or
+// may refuse to run under sudo without a password, so capture the raw
+// output for debugging if the list comes back empty.
+$fsDevices = run_cmd('sudo blkid -o device');
+if (count($fsDevices) === 0) {
+    $message .= '<br><strong>debug:</strong> blkid returned no devices; ' .
+                'check sudo privileges or blkid version.';
+}
+$mounted = run_cmd(nsCmd("mount | awk '{print $1}'"));
+// if `mount` produced no output (sudo restrictions, missing nsenter, etc.)
+// fall back to parsing /proc/1/mounts directly so we still know what’s
+// mounted on the host.
+if (count(array_filter($mounted, fn($l)=>trim($l) !== '')) === 0) {
+    $mounted = [];
+    if (file_exists('/proc/1/mounts')) {
+        $lines = file('/proc/1/mounts', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $l) {
+            $f = preg_split('/\s+/', trim($l));
+            if (isset($f[0])) {
+                $mounted[] = $f[0];
+            }
+        }
+    }
+    $message .= '<br><strong>debug:</strong> used /proc/1/mounts fallback for mounted device list.';
+}
+$mountSet = array_map('trim', $mounted);
+// for debugging, keep a copy of what we think is mounted
+$debugMounted = $mountSet;
+// also build canonical forms of mounted devices to compare against
+$canonicalMounted = [];
+foreach ($mountSet as $m) {
+    if (strpos($m,'/dev/') !== 0) {
+        // ignore non-block entries such as "proc"/"sysfs"; readlink on
+        // these yields paths under the PHP working directory, polluting the
+        // canonical list and causing unrelated candidates to be dropped.
+        continue;
+    }
+    $canon = run_cmd("readlink -f " . escapeshellarg($m));
+    $canonicalMounted[] = trim($canon[0] ?? $m);
+}
+// retain canonical list for diagnostic output as well
+$debugCanonical = $canonicalMounted;
+// we'll also keep a canonical version of the OS root device for filtering
+$canonicalOsRoot = '';
 $osRoot = '';
-$rootSrc = run_cmd("findmnt -n -o SOURCE /");
 if (!empty($rootSrc)) {
+    // start with the raw source reported by findmnt and canonicalize it
     $osRoot = trim($rootSrc[0]);
+    $canonLines = run_cmd("readlink -f " . escapeshellarg($osRoot));
+    $osRoot = trim($canonLines[0] ?? $osRoot);
+
     if (strpos($osRoot, '/dev/md') === 0) {
-        // root lives on an md device; use it verbatim so we only exclude that
-        // specific array rather than all /dev/md*.
-        // leave $osRoot unchanged.
-    } elseif (preg_match('#^/dev/([a-zA-Z0-9]+)#', $osRoot, $m)) {
-        // any other block device, strip trailing digits to get the whole disk
-        $base = $m[1];
-        $base = preg_replace('/\d+$/', '', $base);
-        $osRoot = '/dev/' . $base;
+        // md device – exclude exactly this array.
     } else {
-        // not a block device path
+        // strip trailing digits only for simple disk partitions (/dev/sda1->/dev/sda).
+        // do *not* touch dm-* or mapper paths; they contain hyphens and are already
+        // node-specific.  also be defensive: if the value ends in a hyphen with no
+        // digit (seen on some RHEL versions), treat it as invalid.
+        if (preg_match('#^/dev/[a-z]+[0-9]+$#', $osRoot)) {
+            $osRoot = preg_replace('/\d+$/', '', $osRoot);
+        }
+    }
+    // remember canonical form for later comparisons
+    $corootLines = run_cmd("readlink -f " . escapeshellarg($osRoot));
+    $canonicalOsRoot = trim($corootLines[0] ?? $osRoot);
+    if (preg_match('#/dev/dm-$#', $canonicalOsRoot)) {
+        // bogus result (no trailing number); ignore entirely
+        $canonicalOsRoot = '';
         $osRoot = '';
     }
 }
@@ -516,12 +592,46 @@ foreach ($mdlines as $line) {
 }
 
 $candidates = [];
+// maintain a map from canonical path to the display string we will
+// present; this allows us to deduplicate variants such as
+// "/dev/mapper/vg-lv" vs "/dev/vg/lv" even though they are different
+// strings.  canonicalPaths will hold the keys we’ve already seen.
+$canonicalSeen = [];
 foreach ($fsDevices as $d) {
     $d = trim($d);
     if ($d === '') continue;
-    if (in_array($d, $mountSet, true)) continue; // already mounted
-    // exclude OS disk/partition
-    if ($osRoot !== '' && (strpos($d, $osRoot) === 0)) continue;
+    // canonicalize candidate and compare against mounted devices to avoid
+    // mismatches like /dev/root vs /dev/dm-0
+    $dcanonLines = run_cmd("readlink -f " . escapeshellarg($d));
+    $dcanon = trim($dcanonLines[0] ?? $d);
+    if (in_array($dcanon, $canonicalMounted, true)) continue; // already mounted
+    if (in_array($d, $mountSet, true)) continue; // also check raw form
+    // also exclude any candidate that matches a canonical mounted path of a LV
+    // since mountSet may list the mapper name while blkid returned the /dev/vg/lv
+    foreach ($canonicalMounted as $mc) {
+        if ($mc === $dcanon) { continue 2; }
+    }
+    // exclude OS disk/partition (use canonical paths too)
+    if ($osRoot !== '') {
+        $oscanonLines = run_cmd("readlink -f " . escapeshellarg($osRoot));
+        $oscanon = trim($oscanonLines[0] ?? $osRoot);
+        if (strpos($dcanon, $oscanon) === 0) continue;
+    }
+    // skip swap or devices lacking a filesystem type; blkid may return an empty
+    // string for unformatted volumes or raid chunks which we don't want.
+    $typeLines = run_cmd("sudo blkid -s TYPE -o value " . escapeshellarg($dcanon));
+    $type = trim($typeLines[0] ?? '');
+    if ($type === '' || $type === 'swap') {
+        continue;
+    }
+    // also skip anything that lsblk reports as already mounted, this catches
+    // cases where the mount device is reported under an alias such as
+    // /dev/root or /dev/dm-0 but the candidate is the underlying physical
+    // partition.
+    $mpLines = run_cmd("lsblk -n -o MOUNTPOINT " . escapeshellarg($dcanon));
+    if (trim($mpLines[0] ?? '') !== '') {
+        continue;
+    }
     // exclude any PV (either exact or starts-with for LVM naming)
     $skip = false;
     foreach ($pvSet as $pv) {
@@ -541,8 +651,112 @@ foreach ($fsDevices as $d) {
         }
     }
     if ($skip) continue;
-    $candidates[] = $d;
+    // determine display name as before
+    $display = $d;
+    if (strpos($dcanon, '/dev/mapper/') === 0) {
+        $display = $dcanon;
+    } elseif (preg_match('#^/dev/dm-(\d+)$#', $d, $m)) {
+        $sysname = "/sys/block/dm-$m[1]/dm/name";
+        if (file_exists($sysname)) {
+            $name = trim(@file_get_contents($sysname));
+            if ($name !== '') {
+                $display = "/dev/mapper/$name";
+            }
+        }
+    }
+    // deduplicate by canonical path
+    if (in_array($dcanon, $canonicalSeen, true)) {
+        continue;
+    }
+    $canonicalSeen[] = $dcanon;
+    $candidates[] = $display;
 }
+// debug banner removed once filtering logic stable
+
+// legacy conditional retained for backward-compatibility (should always true now)
+foreach ($candidates as $cand) {
+    if (preg_match('#(/dev/|swap)#', $cand)) {
+        break;
+    }
+}
+// ensure lvPaths is defined in case debug flag is used early (will be
+// overwritten shortly when we actually query lvs below)
+$lvPaths = [];
+
+// additionally include any logical volumes returned by `lvs` that were
+// missed by blkid (e.g. non‑standard filesystem types or blkid failures).  We
+// apply the same filtering rules so we don't offer already‑mounted or
+// special devices.  On some systems sudoers may not allow `lvs` without a
+// path or the output may be empty; warn in that case.
+$lvPaths = run_cmd('sudo /usr/sbin/lvs --noheadings -o lv_path');
+if (count($lvPaths) === 0) {
+    $message .= '<br><strong>debug:</strong> `lvs` produced no output; check sudoers entry for lvs or binary path.';
+}
+// now that we have lvPaths, optionally dump debug data
+if (!empty($_GET['debug'])) {
+    $message .= '<br><strong>debug arrays:</strong>' .
+                '<br>rootSrc=' . htmlspecialchars(json_encode($rootSrc)) .
+                '<br>fsDevices=' . htmlspecialchars(json_encode($fsDevices)) .
+                '<br>mountSet=' . htmlspecialchars(json_encode($mountSet)) .
+                '<br>canonicalMounted=' . htmlspecialchars(json_encode($canonicalMounted)) .
+                '<br>osRoot=' . htmlspecialchars($osRoot) .
+                '<br>canonicalOsRoot=' . htmlspecialchars($canonicalOsRoot) .
+                '<br>candidates=' . htmlspecialchars(json_encode($candidates)) .
+                '<br>lvPaths=' . htmlspecialchars(json_encode($lvPaths));
+}
+foreach ($lvPaths as $lv) {
+    $lv = trim($lv);
+    if ($lv === '') continue;
+    // canonicalize for comparisons
+    $canonLvLines = run_cmd("readlink -f " . escapeshellarg($lv));
+    $lvcanon = trim($canonLvLines[0] ?? $lv);
+    // skip duplicates of already-added candidates (canonical comparison)
+    if (in_array($lvcanon, $canonicalSeen, true)) continue;
+    // skip ones already mounted (check both raw and canonical forms)
+    if (in_array($lv, $mountSet, true) || in_array($lvcanon, $canonicalMounted, true)) continue;
+    // apply same root filtering using canonical paths
+    if ($canonicalOsRoot !== '' && strpos($lvcanon, $canonicalOsRoot) === 0) continue;
+    // ignore swap/empty filesystems even if blkid failed earlier
+    $typeLines = run_cmd("sudo blkid -s TYPE -o value " . escapeshellarg($lvcanon));
+    $type = trim($typeLines[0] ?? '');
+    if ($type === '' || $type === 'swap') {
+        continue;
+    }
+    $skip = false;
+    foreach ($pvSet as $pv) {
+        if ($pv === '') continue;
+        if ($lv === $pv || strpos($lv, $pv) === 0 || $lvcanon === $pv || strpos($lvcanon, $pv) === 0) {
+            $skip = true;
+            break;
+        }
+    }
+    if ($skip) continue;
+    foreach ($mdmembers as $mm) {
+        if ($lv === $mm || strpos($lv, $mm) === 0 || $lvcanon === $mm || strpos($lvcanon, $mm) === 0) {
+            $skip = true;
+            break;
+        }
+    }
+    if ($skip) continue;
+    // determine display name same way as above
+    $display = $lv;
+    if (strpos($lvcanon, '/dev/mapper/') === 0) {
+        $display = $lvcanon;
+    } elseif (preg_match('#^/dev/dm-(\d+)$#', $lv, $m)) {
+        $sysname = "/sys/block/dm-$m[1]/dm/name";
+        if (file_exists($sysname)) {
+            $name = trim(@file_get_contents($sysname));
+            if ($name !== '') {
+                $display = "/dev/mapper/$name";
+            }
+        }
+    }
+    $canonicalSeen[] = $lvcanon;
+    $candidates[] = $display;
+}
+
+// deduplicate canonical candidates list (LV fallback may add duplicates)
+$candidates = array_values(array_unique($candidates));
 
 // load fstab lines so we can mark existing entries
 $fstabLines = [];
@@ -585,6 +799,19 @@ foreach ($mnts as $m) {
                 } else {
                     $groupName = $stat['gid'];
                 }
+                // if only numeric IDs remain, try to resolve them with getent
+                if (ctype_digit((string)$ownerName)) {
+                    $lookup = run_cmd("getent passwd " . intval($ownerName) . " | cut -d: -f1");
+                    if (!empty($lookup) && trim($lookup[0]) !== '') {
+                        $ownerName = trim($lookup[0]);
+                    }
+                }
+                if (ctype_digit((string)$groupName)) {
+                    $lookup = run_cmd("getent group " . intval($groupName) . " | cut -d: -f1");
+                    if (!empty($lookup) && trim($lookup[0]) !== '') {
+                        $groupName = trim($lookup[0]);
+                    }
+                }
                 $perms = substr(sprintf('%o', $stat['mode']), -4);
                 $setuid = ($stat['mode'] & 04000) ? 1 : 0;
                 $setgid = ($stat['mode'] & 02000) ? 1 : 0;
@@ -621,6 +848,18 @@ foreach ($mnts as $m) {
                     $groupName = $gr['name'] ?? $stat['gid'];
                 } else {
                     $groupName = $stat['gid'];
+                }
+                if (ctype_digit((string)$ownerName)) {
+                    $lookup = run_cmd("getent passwd " . intval($ownerName) . " | cut -d: -f1");
+                    if (!empty($lookup) && trim($lookup[0]) !== '') {
+                        $ownerName = trim($lookup[0]);
+                    }
+                }
+                if (ctype_digit((string)$groupName)) {
+                    $lookup = run_cmd("getent group " . intval($groupName) . " | cut -d: -f1");
+                    if (!empty($lookup) && trim($lookup[0]) !== '') {
+                        $groupName = trim($lookup[0]);
+                    }
                 }
                 $perms = substr(sprintf('%o', $stat['mode']), -4);
                 $setuid = ($stat['mode'] & 04000) ? 1 : 0;
@@ -659,7 +898,18 @@ if (count($mounts) === 0 && count($mnts) > 0) {
 
 <div class="row mb-3 align-items-center">
     <div class="col">
-        <h5>Existing <?= htmlentities(mount_root(), ENT_QUOTES) ?> mounts</h5>
+        <?php
+            // mount_root() normalizes slashes and guarantees a leading slash;
+            // show both the effective value and the raw configured string so
+            // the administrator can verify that the right configuration file
+            // was loaded (this is the most common reason the UI still displays
+            // "/export").
+            $cfgBase = cfg('mount_base', '/export');
+            $displayRoot = htmlentities(mount_root(), ENT_QUOTES);
+        ?>
+        <h5>Existing <?= $displayRoot ?> mounts
+            <small class="text-muted">(configured <?= htmlentities($cfgBase, ENT_QUOTES) ?>)</small>
+        </h5>
     </div>
     <div class="col text-end">
         <button id="btnShowMountModal" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createMountModal">Create mount</button>

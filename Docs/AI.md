@@ -20,6 +20,7 @@ helpers (Python/Perl/PAM). The web UI runs under a web server user (e.g.
 
 - This code only runs on a test server, you can not run the code or check logs on the dev desktop. If you want a log entry ask the Dev to provide it.
 - The dev can check logs and/or run console commans in the browser. If you need any of that to diagnose an issue ask.
+- This code should run on any linux distrabution.
 - Any time you add a new shell command that will require root access, update the install.sh and the README.md sudo lines to include this command.
 - All js must be in js files, NO inline JavaScript!
 - All CSS must be in the site CSS file, NO inline CSS!

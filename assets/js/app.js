@@ -1147,6 +1147,16 @@ function showInfo(html) {
     if (btn2) btn2.addEventListener('click', function() { openSubmodal('deletePartModal', btn2.dataset.disk); });
     var btnFmt = body.querySelector('#btnOpenFormat');
     if (btnFmt) btnFmt.addEventListener('click', function() { openSubmodal('formatPartModal', btnFmt.dataset.disk); });
+// NOTE: this file is kept for historical reference only.  The front-end
+// refactor split common logic into `functions.js` and view-specific code into
+// separate modules (`disks.js`, `raid.js`, etc).  `app.js` is deprecated and
+// no longer loaded by the application; the only remaining helper it contained
+// – `submitDiskFormAjax()` – has been moved to `functions.js` above.
+//
+// The remainder of the contents of this file are left untouched in case an
+// administrator or developer wants to compare behaviour, but new code should
+// *never* be added here.
+
     // raid-member links for partitioning underlying disks
     body.querySelectorAll('a.raid-member').forEach(function(link) {
         link.addEventListener('click', function(e) {

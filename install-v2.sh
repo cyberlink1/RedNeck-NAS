@@ -139,7 +139,8 @@ $WWWUSER ALL=(ALL) NOPASSWD: \
     /usr/bin/getent, /usr/bin/nsenter, /sbin/mdadm, /usr/sbin/mdadm, \
     /sbin/vgcreate, /sbin/vgextend, /sbin/lvcreate, /sbin/lvextend, \
     /sbin/lvrename, /sbin/lvconvert, /sbin/lvremove, /sbin/vgremove, \
-    /sbin/pvcreate, /sbin/pvremove, /sbin/pvck, /sbin/pvrepair, /sbin/pvdisplay, /sbin/pvresize, /sbin/pvmove, \
+    /sbin/pvs, /sbin/pvcreate, /sbin/pvremove, /sbin/pvck, /sbin/pvrepair, \
+    /sbin/pvdisplay, /sbin/pvresize, /sbin/pvmove, \
     /sbin/vgs, /sbin/lvs, /sbin/exportfs, /usr/sbin/exportfs, \
     /usr/bin/lsblk, /usr/bin/mkfs*, /sbin/mkfs*, /usr/sbin/mkfs*, \
     /usr/sbin/blkid, /bin/mount, /bin/umount, /bin/mkdir, /bin/rmdir, \
@@ -154,6 +155,21 @@ EOFS
 chmod 440 "$SUDOERS_FILE"
 
 echo "Sudoers entry appended to $SUDOERS_FILE"
+
+# sanity check: ensure the sudoers file actually contains the LVM tools we
+# rely on from the PHP pages.  If it does not, alert the administrator so
+# they can rerun the installer or add the missing lines manually.
+required=(pvdisplay pvcreate pvs vgs lvs lsblk)
+missing=()
+for cmd in "${required[@]}"; do
+    if ! grep -q "${cmd}" "$SUDOERS_FILE"; then
+        missing+=("$cmd")
+    fi
+done
+if [ ${#missing[@]} -ne 0 ]; then
+    echo "WARNING: sudoers file $SUDOERS_FILE is missing entries for: ${missing[*]}"
+    echo "You may need to rerun the installer or add them manually."
+fi
 
 # deploy web UI files to the chosen document root
 echo "deploying web files to ${WEBROOT}"
