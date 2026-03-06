@@ -67,17 +67,19 @@ function get_device_models() {
     }
     return $map;
 }
-// list raw disks not containing partitions (except for MD partitions)
+// list raw disks or partitions suitable for pvcreate (unformatted,
+// not already a PV, not part of an md array).
 function list_disks() {
-    // list only disk‑type devices; we’ll also special‑case md partitions
-    $out = run_cmd("sudo lsblk -dn -o NAME,SIZE,TYPE");
-    // also fetch existing PV names so we can filter them out
+    // base listing includes both disks and partitions so we can return
+    // unformatted partitions as well as whole disks with no children.  use
+    // `-l` to produce a flat list so we don’t get box‑drawing tree prefixes
+    // (├─, └─) which would confuse our parsing logic.
+    $out = run_cmd("sudo lsblk -ln -o NAME,SIZE,TYPE");
     $pvs = run_cmd('sudo pvs --noheadings -o pv_name');
-    // determine member devices of existing MD arrays
+    // determine member devices of existing MD arrays (including partitions)
     $mdmembers = [];
     $mdlines = run_cmd('cat /proc/mdstat');
     foreach ($mdlines as $line) {
-        // look for devices like sdb1
         if (preg_match_all('/\b(sd[a-z0-9]+)\b/', $line, $m)) {
             foreach ($m[1] as $d) {
                 $mdmembers[] = '/dev/'.$d;
@@ -89,55 +91,44 @@ function list_disks() {
         $parts = preg_split('/\s+/', trim($line));
         if (count($parts) < 3) continue;
         list($name,$size,$type) = $parts;
-        if ($type !== 'disk') continue;
+        if ($type !== 'disk' && $type !== 'part') continue;
         $dev = "/dev/" . $name;
-        // skip disks already used as a PV
-        if (in_array($dev, array_map('trim', $pvs), true)) {
+        // never return a device that’s already a PV or an md member
+        if (in_array($dev, array_map('trim', $pvs), true) || in_array($dev, $mdmembers, true)) {
             continue;
         }
-        // skip disks that are part of md array
-        if (in_array($dev, $mdmembers, true)) {
-            continue;
-        }
-        // skip any device that already has a filesystem on it; lsblk's
-        // FSTYPE column will be empty for completely raw disks.  Note that
-        // MD raid arrays report "linux_raid_member" even when they lack any
-        // user filesystem – that metadata should *not* prevent the array from
-        // appearing here, so treat it as if there is no filesystem.
-        $typeLines = run_cmd("sudo lsblk -n -o FSTYPE " . escapeshellarg($dev));
-        $fstype = trim($typeLines[0] ?? '');
+        // skip any device that already has a non‑raid filesystem on it
+        $fstype = trim((run_cmd("sudo lsblk -n -o FSTYPE " . escapeshellarg($dev))[0] ?? ''));
         if ($fstype !== '' && $fstype !== 'linux_raid_member') {
-            // formatted device, not safe to reinitialize
             continue;
         }
-        // skip disks with any partitions
-        $children = run_cmd("sudo lsblk -n -o TYPE " . escapeshellarg($dev));
-        $hasPart = false;
-        foreach ($children as $c) {
-            if (trim($c) === 'part') { $hasPart = true; break; }
+        if ($type === 'disk') {
+            // for whole disks only include them if they have no partitions at
+            // all; any child partition will be evaluated separately in the
+            // preceding loop iteration because lsblk lists parts individually.
+            $children = run_cmd("sudo lsblk -n -o TYPE " . escapeshellarg($dev));
+            $hasPart = false;
+            foreach ($children as $c) {
+                if (trim($c) === 'part') { $hasPart = true; break; }
+            }
+            if ($hasPart) continue;
         }
-        if ($hasPart) continue;
         $result[] = $dev . "," . $size;
     }
-    // include md devices themselves so they can be pvcreated (unless already a PV).
-    // some kernels populate /dev/md0, others use /dev/md/0; we accommodate both
-    // and ignore the literal /dev/md directory if it exists.
+    // keep existing MD device handling unchanged – it already considers
+    // partitions and the array itself.
     $mds = run_cmd("/bin/ls /dev/md* /dev/md/* 2>/dev/null");
     foreach ($mds as $line) {
         $dev = trim($line);
         if ($dev === '' || $dev === '/dev/md') continue;
         if (!preg_match('#^/dev/md#', $dev)) continue;
-        // if the path is a directory (e.g. /dev/md/), skip it
         if (is_dir($dev)) continue;
-        // check if the array itself has any partitions
         $parts = run_cmd("sudo lsblk -n -o TYPE " . escapeshellarg($dev));
         $hasPart = false;
         foreach ($parts as $p) {
             if (trim($p) === 'part') { $hasPart = true; break; }
         }
         if ($hasPart) {
-            // gather each partition and apply the same filters we used
-            // earlier for top-level disks.
             $childInfo = run_cmd("sudo lsblk -ln -o NAME,SIZE,TYPE " . escapeshellarg($dev));
             foreach ($childInfo as $cline) {
                 $cparts = preg_split('/\s+/', trim($cline));
@@ -146,19 +137,16 @@ function list_disks() {
                 if ($ctype !== 'part') continue;
                 $cdev = '/dev/' . $cname;
                 if (in_array($cdev, array_map('trim', $pvs), true)) continue;
-                $fsLines = run_cmd("sudo lsblk -n -o FSTYPE " . escapeshellarg($cdev));
-                $cfs = trim($fsLines[0] ?? '');
+                $cfs = trim((run_cmd("sudo lsblk -n -o FSTYPE " . escapeshellarg($cdev))[0] ?? ''));
                 if ($cfs !== '' && $cfs !== 'linux_raid_member') continue;
                 $result[] = $cdev . ',' . $csize;
             }
             continue;
         }
-        // no partitions: treat the md device itself
         if (in_array($dev, array_map('trim', $pvs), true)) {
             continue;
         }
-        $typeLines = run_cmd("sudo lsblk -n -o FSTYPE " . escapeshellarg($dev));
-        $fstype = trim($typeLines[0] ?? '');
+        $fstype = trim((run_cmd("sudo lsblk -n -o FSTYPE " . escapeshellarg($dev))[0] ?? ''));
         if ($fstype !== '' && $fstype !== 'linux_raid_member') {
             continue;
         }
